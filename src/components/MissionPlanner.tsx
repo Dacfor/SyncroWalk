@@ -192,14 +192,15 @@ const FALLBACK_M20_WAYPOINTS = [
 // 3 Simulated Role Filter Presets (Auto-applied when switching authenticated user)
 const ROLE_FILTER_PRESETS = {
   scientist: {
-    roleName: 'Scientist (Geology & Astrobiology)',
+    roleName: 'Scientist',
     badgeColor: '#2D7FF9',
     description:
       'Compares orbital CRISM/TES prior against in-situ PDS SuperCam, PIXL & SHERLOC measurements.',
+    // Clean default view: every map layer starts OFF, the scientist turns on what they need
     filters: {
-      filter1_spectralFusion: true, // TES Clay + CRISM Prior vs PDS Posterior Fusion Polygons
-      filter2_thermalInertia: true, // THEMIS Night IR bedrock vs aeolian sand
-      filter3_pdsTargetsTraverse: true, // HiRISE 25cm + Perseverance Traverse + PDS Notebook POIs
+      filter1_spectralFusion: false, // TES Clay + CRISM Prior vs PDS Posterior Fusion Polygons
+      filter2_thermalInertia: false, // THEMIS Night IR bedrock vs aeolian sand
+      filter3_pdsTargetsTraverse: false, // Perseverance Traverse + Sol waypoints
       topographySlope: false,
       atmosphereMeda: false,
       candidateRoutes: true
@@ -737,6 +738,36 @@ const addMinutesToLst = (hhmm, minutes) => {
 
 const formatDuration = (minutes) => `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')} min`;
 
+// One NASA Trek / ArcGIS tile layer from a catalog entry (used by the main map and the field map)
+const createRasterLayer = (L, cfg, zIndex) =>
+  L.tileLayer(cfg.url, {
+    tileSize: cfg.tileSize ?? 256,
+    zoomOffset: cfg.zoomOffset ?? 0,
+    minNativeZoom: cfg.minNative ?? 0,
+    maxNativeZoom: cfg.maxNative,
+    maxZoom: 18,
+    noWrap: true,
+    bounds: cfg.bounds ?? [
+      [-90, -180],
+      [90, 180]
+    ],
+    opacity: cfg.defaultOpacity,
+    zIndex,
+    className: cfg.className ?? ''
+  });
+
+// Field discoveries (FE-…): shown on their own map for the scientist, not on the main map
+const FIELD_EVENT_META = {
+  'formation-interest': { color: '#38bdf8', label: 'Formation of interest', defaultPriority: 'HIGH' },
+  boulder: { color: '#E5484D', label: 'Boulder hazard', defaultPriority: 'LOW' },
+  'soft-soil': { color: '#E5C04A', label: 'Soft soil', defaultPriority: 'LOW' }
+};
+
+const buildFieldEventMarkerHtml = (fe, selected) => {
+  const meta = FIELD_EVENT_META[fe.class] ?? FIELD_EVENT_META['formation-interest'];
+  return `<div class="mh-fe-marker${selected ? ' is-selected' : ''}" style="--fe-color:${meta.color}"><span aria-hidden="true">◆</span>${escapeHtml(fe.id)}</div>`;
+};
+
 // Simulated crew roster for Mission Control (demo data — not real telemetry).
 // Surface dose = cumulative since landing (Sol 1 → today), planned vs measured by suit dosimeter.
 const CREW_ROSTER = [
@@ -835,6 +866,13 @@ export default function MissionPlanner() {
   const [toastMsg, setToastMsg] = useState(null);
   // Scientist "Add POI" draft (null = form closed). Location = the currently selected map point.
   const [newPoiDraft, setNewPoiDraft] = useState(null);
+  // Scientist "Field discoveries" window: its own Leaflet map, separate from the main map
+  const [showFieldMap, setShowFieldMap] = useState(false);
+  const [fieldPoiPriority, setFieldPoiPriority] = useState('HIGH');
+  const asideRef = useRef(null);
+  const fieldMapContainerRef = useRef(null);
+  const fieldMapRef = useRef(null);
+  const fieldMapLayerRef = useRef(null);
 
   // Mission Hub theme: 'auto' follows the device, 'light' / 'dark' force it
   const [themePref, setThemePref] = useState(() => {
@@ -1017,22 +1055,7 @@ export default function MissionPlanner() {
 
       // 4. Create NASA Trek WMTS & ArcGIS Tile Layers from index_2.html
       JEZERO_RASTER_CATALOG.forEach((cfg, idx) => {
-        const lyr = L.tileLayer(cfg.url, {
-          tileSize: cfg.tileSize ?? 256,
-          zoomOffset: cfg.zoomOffset ?? 0,
-          minNativeZoom: cfg.minNative ?? 0,
-          maxNativeZoom: cfg.maxNative,
-          maxZoom: 18,
-          noWrap: true,
-          bounds: cfg.bounds ?? [
-            [-90, -180],
-            [90, 180]
-          ],
-          opacity: cfg.defaultOpacity,
-          zIndex: 10 + idx,
-          className: cfg.className ?? ''
-        });
-        tileLayersRef.current[cfg.id] = lyr;
+        tileLayersRef.current[cfg.id] = createRasterLayer(L, cfg, 10 + idx);
       });
 
       // Base imagery layers on by default
@@ -1057,6 +1080,7 @@ export default function MissionPlanner() {
         const nearest = findNearestPerseveranceSol(lat, lng);
         const molaZ = estimateJezeroMolaElevation(lat, lng);
 
+        // Only the point is drawn on the map; its data is shown in the bar below the map
         if (vectorGroupsRef.current.clickPin) {
           vectorGroupsRef.current.clickPin.clearLayers();
           L.circleMarker([lat, lng], {
@@ -1065,12 +1089,7 @@ export default function MissionPlanner() {
             weight: 2.5,
             fillColor: '#FC3D21',
             fillOpacity: 0.9
-          })
-            .bindTooltip(
-              `MOLA: ${molaZ} m · Sol ${nearest?.sol ?? '?'} (${nearest?.km.toFixed(2)} km)`,
-              { permanent: true, direction: 'top', className: 'syncrowalk-tooltip' }
-            )
-            .addTo(vectorGroupsRef.current.clickPin);
+          }).addTo(vectorGroupsRef.current.clickPin);
         }
 
         setClickedPoint({
@@ -1085,6 +1104,10 @@ export default function MissionPlanner() {
       });
 
       mapInstanceRef.current = map;
+      // The map now fills a flexible-height panel: keep Leaflet in sync with its real size
+      if (typeof ResizeObserver !== 'undefined') {
+        new ResizeObserver(() => map.invalidateSize()).observe(mapContainerRef.current);
+      }
       setMapReady(true);
       appendStatus('Jezero L.CRS.EPSG4326 map ready. HiRISE 25 cm/px active at zoom 14–17.');
 
@@ -1391,9 +1414,11 @@ export default function MissionPlanner() {
     }
 
     // 6. Render Field Events Layer ([boulder], [soft-soil], [formation-interest])
+    //    Scientist: kept OFF the main map (too cluttered) — they live in the Field discoveries map.
     const feGroup = vectorGroupsRef.current.fieldEvents;
     feGroup.clearLayers();
-    mission.fieldEvents.forEach((fe) => {
+    const mainMapFieldEvents = currentRole === 'scientist' ? [] : mission.fieldEvents;
+    mainMapFieldEvents.forEach((fe) => {
       const color =
         fe.class === 'boulder'
           ? '#E5484D'
@@ -1448,6 +1473,109 @@ export default function MissionPlanner() {
       m.addTo(poiGroup);
     });
   }, [mapReady, activeFilters, currentRole, mission, rasterOpacities, selectedPoiId, sepAlertActive]);
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // FIELD DISCOVERIES MAP (Scientist): a second, independent Leaflet map that lives
+  // only while its window is open. The main persistent map is never touched.
+  // ═══════════════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    const L = window.L;
+    const el = fieldMapContainerRef.current;
+    if (!showFieldMap || !L || !el) return;
+
+    const fmap = L.map(el, {
+      crs: L.CRS.EPSG4326,
+      minZoom: 10,
+      maxZoom: 18,
+      attributionControl: false
+    });
+    ['viking', 'ctxGlobal', 'ctxJez', 'hiriseJez'].forEach((id, idx) => {
+      const cfg = JEZERO_RASTER_CATALOG.find((c) => c.id === id);
+      if (cfg) createRasterLayer(L, cfg, 10 + idx).addTo(fmap);
+    });
+    fieldMapLayerRef.current = L.layerGroup().addTo(fmap);
+    const fitAllDiscoveries = () =>
+      fmap.fitBounds(
+        mission.fieldEvents.map((fe) => [fe.lat, fe.lon]),
+        { padding: [70, 70], maxZoom: 16 }
+      );
+    fitAllDiscoveries();
+    fieldMapRef.current = fmap;
+
+    // The dialog reaches its final size after the first layout: re-fit once at that point
+    let firstResize = true;
+    const ro =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(() => {
+            fmap.invalidateSize();
+            if (firstResize) {
+              firstResize = false;
+              fitAllDiscoveries();
+            }
+          })
+        : null;
+    ro?.observe(el);
+
+    return () => {
+      ro?.disconnect();
+      fmap.remove();
+      fieldMapRef.current = null;
+      fieldMapLayerRef.current = null;
+    };
+  }, [showFieldMap]);
+
+  useEffect(() => {
+    const L = window.L;
+    const group = fieldMapLayerRef.current;
+    if (!showFieldMap || !L || !group) return;
+    group.clearLayers();
+
+    // Existing POIs as faded context flags (not clickable here)
+    mission.pois.forEach((poi) => {
+      L.marker([poi.lat, poi.lon], {
+        interactive: false,
+        icon: L.divIcon({
+          className: '',
+          html: `<div class="mh-poi-flag" style="opacity:0.55">${flagSvg(
+            POI_FLAG_COLORS[poi.priority] ?? POI_FLAG_COLORS.LOW,
+            String(poi.order)
+          )}</div>`,
+          iconSize: [30, 36],
+          iconAnchor: [5, 34]
+        })
+      }).addTo(group);
+    });
+
+    mission.fieldEvents.forEach((fe) => {
+      const isSel = fe.id === selectedFieldEventId;
+      const m = L.marker([fe.lat, fe.lon], {
+        zIndexOffset: isSel ? 1000 : 100,
+        keyboard: true,
+        icon: L.divIcon({
+          className: '',
+          html: buildFieldEventMarkerHtml(fe, isSel),
+          iconSize: null
+        })
+      });
+      m.on('click', () => selectFieldEvent(fe));
+      m.addTo(group);
+    });
+  }, [showFieldMap, mission.fieldEvents, mission.pois, selectedFieldEventId]);
+
+  const openFieldMap = (feId) => {
+    if (feId) {
+      setSelectedFieldEventId(feId);
+      const fe = mission.fieldEvents.find((f) => f.id === feId);
+      setFieldPoiPriority((FIELD_EVENT_META[fe?.class] ?? FIELD_EVENT_META['formation-interest']).defaultPriority);
+    }
+    setShowFieldMap(true);
+  };
+
+  const selectFieldEvent = (fe) => {
+    setSelectedFieldEventId(fe.id);
+    setFieldPoiPriority((FIELD_EVENT_META[fe.class] ?? FIELD_EVENT_META['formation-interest']).defaultPriority);
+    fieldMapRef.current?.panTo([fe.lat, fe.lon], { animate: true });
+  };
 
   // ═══════════════════════════════════════════════════════════════════════════
   // ACTION: EXECUTE 12-MINUTE HANDHELD FUNNEL & PROMOTE FIELD DISCOVERY TO POI
@@ -1575,10 +1703,18 @@ export default function MissionPlanner() {
     }));
   };
 
-  // Scientist adds a new POI at the currently selected map point
-  const handleAddScientistPoi = () => {
-    if (!newPoiDraft) return;
-    const { lat, lon, molaElevationM } = clickedPoint;
+  // Creates a scientist POI (SCI-n) and returns its id. Optionally links it to the
+  // field discovery it came from (fromFieldEventId), so that event shows "Added as SCI-n".
+  const createScientistPoi = ({
+    lat,
+    lon,
+    elevM,
+    name,
+    feature,
+    priority,
+    sourceBadge,
+    fromFieldEventId = null
+  }) => {
     const nextNum =
       mission.pois.reduce(
         (max, p) => (p.id.startsWith('SCI-') ? Math.max(max, Number(p.id.slice(4)) || 0) : max),
@@ -1586,18 +1722,17 @@ export default function MissionPlanner() {
       ) + 1;
     const id = `SCI-${nextNum}`; // own prefix: never collides with the demo's POI-4 promotion
     const ctx = inferOrbitalContext(lat, lon);
-    const name = newPoiDraft.name.trim() || `Science target ${nextNum}`;
 
     const newPoi = {
       id,
       order: mission.pois.length + 1,
-      name,
-      feature: newPoiDraft.note.trim() || 'Scientist-flagged outcrop (awaiting in-situ funnel)',
-      priority: newPoiDraft.priority,
+      name: name?.trim() || `Science target ${nextNum}`,
+      feature: feature?.trim() || 'Scientist-flagged outcrop (awaiting in-situ funnel)',
+      priority,
       lat,
       lon,
-      elevM: molaElevationM,
-      sourceBadge: 'Added by Science team · map pick + MOLA elevation',
+      elevM,
+      sourceBadge,
       dataConfidence: 'orbital-only',
       activities: ['Stand-off SuperCam', 'Surface Abrasion', 'PIXL + SHERLOC Contact'],
       durationMin: 35,
@@ -1617,11 +1752,53 @@ export default function MissionPlanner() {
 
     setMission((prev) => ({
       ...prev,
-      pois: [...prev.pois, { ...newPoi, order: prev.pois.length + 1 }]
+      pois: [...prev.pois, { ...newPoi, order: prev.pois.length + 1 }],
+      fieldEvents: fromFieldEventId
+        ? prev.fieldEvents.map((fe) =>
+            fe.id === fromFieldEventId ? { ...fe, promotedPoiId: id } : fe
+          )
+        : prev.fieldEvents
     }));
     setSelectedPoiId(id);
+    triggerToast(
+      `New target ${id} "${newPoi.name}" added to the map (${PRIORITY_META[priority].label} priority).`
+    );
+    return id;
+  };
+
+  // Scientist adds a new POI at the currently selected map point
+  const handleAddScientistPoi = () => {
+    if (!newPoiDraft) return;
+    createScientistPoi({
+      lat: clickedPoint.lat,
+      lon: clickedPoint.lon,
+      elevM: clickedPoint.molaElevationM,
+      name: newPoiDraft.name,
+      feature: newPoiDraft.note,
+      priority: newPoiDraft.priority,
+      sourceBadge: 'Added by Science team · map pick + MOLA elevation'
+    });
     setNewPoiDraft(null);
-    triggerToast(`New target ${id} "${name}" added to the map (${PRIORITY_META[newPoi.priority].label} priority).`);
+  };
+
+  // Scientist adds a POI from a field discovery (Field discoveries map)
+  const handleAddPoiFromFieldEvent = (fe, priority) => {
+    createScientistPoi({
+      lat: fe.lat,
+      lon: fe.lon,
+      elevM: estimateJezeroMolaElevation(fe.lat, fe.lon),
+      name: fe.title,
+      feature: fe.description,
+      priority,
+      sourceBadge: `Field discovery ${fe.id} · ${fe.source} · ${fe.ts}`,
+      fromFieldEventId: fe.id
+    });
+  };
+
+  // Opens the "Add POI" form in the right panel (location = selected map point)
+  const openAddPoiForm = () => {
+    setNewPoiDraft((d) => d ?? { name: '', priority: 'MED', note: '' });
+    asideRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1728,7 +1905,9 @@ export default function MissionPlanner() {
   );
 
   return (
-    <div className="min-h-screen w-full bg-mh-bg text-mh-text flex flex-col select-none overflow-x-hidden">
+    // Desktop (lg+): app shell exactly one screen tall — the page never scrolls, only the right panel does
+    // (`relative` so absolutely-positioned children, e.g. sr-only labels, are clipped too)
+    <div className="relative min-h-screen w-full bg-mh-bg text-mh-text flex flex-col select-none overflow-x-hidden lg:h-screen lg:overflow-hidden">
       {/* ═══════════════════════════════════════════════════════════════════════
           §1 GLOBAL TOP BAR (Mission Hub navbar): BRAND + AUTH SWITCHER + DEMO + THEME
          ═══════════════════════════════════════════════════════════════════════ */}
@@ -1818,13 +1997,13 @@ export default function MissionPlanner() {
       {/* ═══════════════════════════════════════════════════════════════════════
           HERO BAND: SOL CONTEXT + ACTIVE ROLE + 3-SOL DEMO STEPPER
          ═══════════════════════════════════════════════════════════════════════ */}
-      <section className="mh-hero !py-5 sm:!py-6">
+      <section className="mh-hero !py-4 shrink-0">
         <div className="flex flex-wrap items-end justify-between gap-4">
-          <div className="flex flex-col gap-2 min-w-0">
+          <div className="flex flex-col gap-1.5 min-w-0">
             <span className="mh-eyebrow mh-eyebrow--line !text-white">
               Sol {23 + mission.demoScriptSol} · Séítah &amp; Western Delta · Plan {mission.activePlanVersion}
             </span>
-            <h1 className="text-[28px] sm:text-[34px] leading-tight font-extrabold tracking-[-0.01em] m-0">
+            <h1 className="text-[26px] sm:text-[30px] leading-tight font-extrabold tracking-[-0.01em] m-0">
               {ROLE_FILTER_PRESETS[currentRole].roleName}
             </h1>
             <p className="m-0 text-base max-w-3xl">{ROLE_FILTER_PRESETS[currentRole].description}</p>
@@ -1873,7 +2052,7 @@ export default function MissionPlanner() {
       {/* Toast Notification — floats, so the layout never jumps */}
       {toastMsg && (
         <div
-          className="fixed bottom-4 inset-x-4 sm:inset-x-auto sm:right-6 sm:max-w-md z-50"
+          className="fixed bottom-4 inset-x-4 sm:inset-x-auto sm:right-6 sm:max-w-md z-[60]"
           role="status"
           aria-live="polite"
         >
@@ -1893,21 +2072,17 @@ export default function MissionPlanner() {
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════════
-          WORKSPACE: STICKY JEZERO MAP (LEFT) + ROLE DECISION DECK (RIGHT)
+          WORKSPACE: STATIC JEZERO MAP (LEFT, flush to the screen edge) + SCROLLING DECK (RIGHT)
          ═══════════════════════════════════════════════════════════════════════ */}
-      <main className="w-full max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_440px] xl:grid-cols-[minmax(0,1fr)_520px] gap-5 sm:gap-6 px-4 sm:px-6 py-6 sm:py-8 items-start">
-        {/* LEFT: PERSISTENT LEAFLET MAP CARD */}
+      <main className="w-full flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_420px] xl:grid-cols-[minmax(0,1fr)_480px] 2xl:grid-cols-[minmax(0,1fr)_540px] gap-4 sm:gap-5 pl-4 pr-4 sm:pr-6 lg:pl-0 py-4">
+        {/* LEFT: PERSISTENT LEAFLET MAP CARD (fills the full height, never scrolls away) */}
         <section
-          className="lg:sticky lg:top-6 flex flex-col bg-mh-card rounded-mh-lg shadow-mh overflow-hidden"
+          className="flex flex-col bg-mh-card rounded-mh-lg lg:rounded-l-none shadow-mh overflow-hidden lg:h-full lg:min-h-0"
           aria-label="Jezero map"
         >
-          {/* Map header: role filter toggles */}
-          <div className="px-5 pt-5 pb-4 flex flex-col gap-3 border-b border-mh-sep">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <span className="mh-eyebrow">Map layers · {ROLE_LABELS[currentRole]}</span>
-              <span className="text-base text-mh-text2">Tap a filter to show or hide it</span>
-            </div>
-            <div className="flex flex-wrap gap-2">
+          {/* Map header: one compact row (layer toggles + Field discoveries) → more room for the map */}
+          <div className="px-5 py-3 flex flex-wrap items-center gap-2 border-b border-mh-sep shrink-0">
+              <span className="mh-eyebrow mr-1">Layers</span>
               <FilterToggle
                 on={activeFilters.filter1_spectralFusion}
                 onClick={() => handleToggleRoleFilter('filter1_spectralFusion')}
@@ -1939,11 +2114,22 @@ export default function MissionPlanner() {
               >
                 Perseverance traverse (PDS)
               </FilterToggle>
-            </div>
+              {currentRole === 'scientist' && (
+                <button
+                  type="button"
+                  onClick={() => openFieldMap()}
+                  className="mh-btn mh-btn--plain !min-h-9 !px-4 !text-[15px] ml-auto"
+                  title="Open the in-situ field discoveries (FE-…) on their own map"
+                >
+                  <MapPin className="w-4 h-4" aria-hidden="true" />
+                  <span>Field discoveries</span>
+                  <span className="mh-pill mh-pill--info !py-0">{mission.fieldEvents.length}</span>
+                </button>
+              )}
           </div>
 
           {/* Map */}
-          <div className="relative h-[420px] sm:h-[520px] lg:h-[calc(100vh-30rem)] lg:min-h-[360px] lg:max-h-[720px]">
+          <div className="relative h-[420px] sm:h-[520px] lg:h-auto lg:flex-1 lg:min-h-0">
             <div ref={mapContainerRef} className="w-full h-full z-10" />
 
             {/* SVG filter used by .mh-thermal-rdbu: grayscale THEMIS → red–blue colormap */}
@@ -2012,48 +2198,53 @@ export default function MissionPlanner() {
             </div>
           </div>
 
-          {/* Map footer: selected point + prior/posterior fusion */}
-          <div className="p-5 grid grid-cols-1 xl:grid-cols-2 gap-4">
-            <div className="mh-tile">
-              <span className="mh-eyebrow">
-                <MapPin className="w-4 h-4" aria-hidden="true" />
-                Selected point
-              </span>
-              <p className="m-0 text-base font-mono">
-                {clickedPoint.lat.toFixed(5)}° N · {clickedPoint.lon.toFixed(5)}° E
-              </p>
-              <p className="m-0 text-base">
-                MOLA elevation <strong>{clickedPoint.molaElevationM} m</strong>
-              </p>
-              <p className="m-0 text-base text-mh-text2">
-                Sol {clickedPoint.nearestSol} · {clickedPoint.nearestWaypointName} ·{' '}
-                {clickedPoint.distanceKm.toFixed(2)} km
-              </p>
-              <p className="m-0 text-base text-mh-text2">Click the map to inspect a point.</p>
-            </div>
-
-            {/* Scientist: add a new POI at the selected point */}
+          {/* Map footer: compact selected-point bar (the map itself only shows the dot) */}
+          <div className="px-5 py-2.5 border-t border-mh-sep flex flex-wrap items-center gap-x-5 gap-y-1 shrink-0 [&>span]:!text-[15px]">
+            <span className="mh-eyebrow">
+              <MapPin className="w-4 h-4" aria-hidden="true" />
+              Selected point
+            </span>
+            <span className="text-base font-mono">
+              {clickedPoint.lat.toFixed(5)}° N · {clickedPoint.lon.toFixed(5)}° E
+            </span>
+            <span className="text-base">
+              MOLA <strong>{clickedPoint.molaElevationM} m</strong>
+            </span>
+            <span className="text-base text-mh-text2">
+              Sol {clickedPoint.nearestSol} · {clickedPoint.nearestWaypointName} ·{' '}
+              {clickedPoint.distanceKm.toFixed(2)} km
+            </span>
             {currentRole === 'scientist' && (
-              <div className="mh-tile !gap-3">
-                <span className="mh-eyebrow">
-                  <Flag className="w-4 h-4" aria-hidden="true" />
-                  New target
-                </span>
-                {!newPoiDraft ? (
-                  <>
-                    <p className="m-0 text-base text-mh-text2">
-                      Click the map to choose a spot, then add it as a POI flag.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => setNewPoiDraft({ name: '', priority: 'MED', note: '' })}
-                      className="mh-btn mh-btn--tinted self-start"
-                    >
-                      <PlusCircle className="w-5 h-5" />
-                      <span>Add POI at selected point</span>
-                    </button>
-                  </>
-                ) : (
+              <button
+                type="button"
+                onClick={openAddPoiForm}
+                className="mh-btn mh-btn--tinted !min-h-10 lg:ml-auto"
+                title="Click the map to choose a spot, then add it as a POI flag"
+              >
+                <PlusCircle className="w-5 h-5" />
+                <span>Add POI here</span>
+              </button>
+            )}
+          </div>
+        </section>
+
+        {/* RIGHT: ROLE-SPECIFIC DECISION DECK (the only part that scrolls on desktop) */}
+        <aside
+          ref={asideRef}
+          className="relative flex flex-col gap-4 sm:gap-5 min-w-0 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:pr-1 lg:pb-2"
+          aria-label="Decision panel"
+        >
+          {/* ═══════════════════════════ ROLE 1: SCIENTIST ═══════════════════════════ */}
+          {currentRole === 'scientist' && (
+            <>
+              {newPoiDraft && (
+                <Card
+                  eyebrow="New target"
+                  title="Add POI at the selected point"
+                  icon={Flag}
+                  subtitle="Click the map to move the point, then place the flag."
+                  highlight
+                >
                   <form
                     className="flex flex-col gap-3"
                     onSubmit={(e) => {
@@ -2067,7 +2258,7 @@ export default function MissionPlanner() {
                       </label>
                       <input
                         id="new-poi-name"
-                        className="mh-input !bg-mh-card select-text"
+                        className="mh-input select-text"
                         placeholder="e.g. Bright fracture fill"
                         maxLength={60}
                         value={newPoiDraft.name}
@@ -2081,7 +2272,7 @@ export default function MissionPlanner() {
                       </label>
                       <input
                         id="new-poi-note"
-                        className="mh-input !bg-mh-card select-text"
+                        className="mh-input select-text"
                         placeholder="e.g. Possible hydrated silica vein"
                         maxLength={120}
                         value={newPoiDraft.note}
@@ -2094,7 +2285,7 @@ export default function MissionPlanner() {
                       </label>
                       <select
                         id="new-poi-priority"
-                        className="mh-input !bg-mh-card cursor-pointer"
+                        className="mh-input cursor-pointer"
                         value={newPoiDraft.priority}
                         onChange={(e) => setNewPoiDraft((d) => ({ ...d, priority: e.target.value }))}
                       >
@@ -2115,23 +2306,15 @@ export default function MissionPlanner() {
                       <button
                         type="button"
                         onClick={() => setNewPoiDraft(null)}
-                        className="mh-btn bg-mh-card text-mh-text"
+                        className="mh-btn bg-mh-fill text-mh-text"
                       >
                         Cancel
                       </button>
                     </div>
                   </form>
-                )}
-              </div>
-            )}
-          </div>
-        </section>
+                </Card>
+              )}
 
-        {/* RIGHT: ROLE-SPECIFIC DECISION DECK (scrolls with the page) */}
-        <aside className="flex flex-col gap-5 sm:gap-6 min-w-0" aria-label="Decision panel">
-          {/* ═══════════════════════════ ROLE 1: SCIENTIST ═══════════════════════════ */}
-          {currentRole === 'scientist' && (
-            <>
               <Card
                 eyebrow="Decision next to data"
                 title="Decision funnel: rover 4 sols → astronaut 12 min"
@@ -2212,34 +2395,46 @@ export default function MissionPlanner() {
               <Card
                 eyebrow="Field discoveries"
                 title="In-situ discoveries & target priority"
-                subtitle="Promote a discovery to update the CRISM posterior and the route plan."
+                subtitle="Field discoveries open on their own map: review them there and add a POI if needed."
                 collapsible
               >
-                {mission.fieldEvents
-                  .filter((fe) => fe.id === 'FE-024-003')
-                  .map((fe) => (
-                    <div key={fe.id} className="mh-tile !gap-2 ring-2 ring-mh-info">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="font-mono text-[13px] text-mh-text2">{fe.id}</span>
-                        <span className="mh-pill mh-pill--info">Funnel 12 min</span>
-                      </div>
-                      <strong className="text-base">{fe.title}</strong>
-                      <p className="m-0 text-base text-mh-text2">{fe.description}</p>
-                      <p className="m-0 text-base text-mh-text2">Source: {fe.source}</p>
-                      {!fe.promotedPoiId ? (
+                <ul className="m-0 p-0 list-none flex flex-col gap-2" aria-label="Field discoveries">
+                  {mission.fieldEvents.map((fe) => {
+                    const meta = FIELD_EVENT_META[fe.class] ?? FIELD_EVENT_META['formation-interest'];
+                    return (
+                      <li key={fe.id}>
                         <button
                           type="button"
-                          onClick={() => handleRunRapidFunnelAndPromote(fe.id)}
-                          className="mh-btn mh-btn--primary self-start mt-1"
+                          onClick={() => openFieldMap(fe.id)}
+                          className="w-full min-h-11 p-3 rounded-mh-md bg-mh-fill border-0 cursor-pointer text-left text-mh-text flex items-center gap-3"
                         >
-                          <PlusCircle className="w-5 h-5" />
-                          <span>Promote to high-priority POI</span>
+                          <span className="text-[18px] leading-none shrink-0" style={{ color: meta.color }} aria-hidden="true">
+                            ◆
+                          </span>
+                          <span className="min-w-0 flex-1 flex flex-col">
+                            <span className="text-base font-semibold">{fe.title}</span>
+                            <span className="text-base text-mh-text2">
+                              {fe.id} · {meta.label} · {Math.round(fe.confidence * 100)}%
+                            </span>
+                          </span>
+                          {fe.promotedPoiId ? (
+                            <span className="mh-pill mh-pill--ok shrink-0">{fe.promotedPoiId}</span>
+                          ) : (
+                            <span className="mh-pill mh-pill--info shrink-0">Review</span>
+                          )}
                         </button>
-                      ) : (
-                        <span className="mh-pill mh-pill--ok self-start mt-1">Promoted to POI-4</span>
-                      )}
-                    </div>
-                  ))}
+                      </li>
+                    );
+                  })}
+                </ul>
+                <button
+                  type="button"
+                  onClick={() => openFieldMap()}
+                  className="mh-btn mh-btn--tinted self-start"
+                >
+                  <MapPin className="w-5 h-5" />
+                  <span>Open field discoveries map</span>
+                </button>
 
                 <p className="m-0 text-base text-mh-text2">
                   <strong className="text-mh-text">Priority</strong> sets the flag colour on the map;
@@ -2717,6 +2912,181 @@ export default function MissionPlanner() {
       </main>
 
       {/* ═══════════════════════════════════════════════════════════════════════
+          FIELD DISCOVERIES WINDOW (Scientist): separate map + careful review + add POI
+         ═══════════════════════════════════════════════════════════════════════ */}
+      {showFieldMap && (() => {
+        const fe =
+          mission.fieldEvents.find((f) => f.id === selectedFieldEventId) || mission.fieldEvents[0];
+        const meta = FIELD_EVENT_META[fe.class] ?? FIELD_EVENT_META['formation-interest'];
+        const linkedPoi = fe.promotedPoiId && mission.pois.find((p) => p.id === fe.promotedPoiId);
+        return (
+          <div
+            className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6"
+            onClick={() => setShowFieldMap(false)}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="field-map-title"
+              onClick={(e) => e.stopPropagation()}
+              className="bg-mh-card rounded-mh-lg shadow-mh w-full max-w-[1400px] h-[92vh] flex flex-col overflow-hidden"
+            >
+              <div className="px-5 py-4 flex items-start justify-between gap-3 border-b border-mh-sep shrink-0">
+                <div className="flex flex-col gap-1 min-w-0">
+                  <span className="mh-eyebrow mh-eyebrow--line">Field discoveries</span>
+                  <h2 id="field-map-title" className="m-0 text-[22px] leading-tight font-bold">
+                    In-situ discoveries map
+                  </h2>
+                  <p className="m-0 text-base text-mh-text2">
+                    Kept off the main map. Select a discovery to review it and add it as a POI.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowFieldMap(false)}
+                  className="mh-btn mh-btn--icon bg-mh-fill text-mh-text shrink-0"
+                  aria-label="Close"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex-1 min-h-0 grid grid-cols-1 grid-rows-[minmax(260px,45%)_1fr] lg:grid-rows-1 lg:grid-cols-[minmax(0,1fr)_420px]">
+                <div ref={fieldMapContainerRef} className="w-full h-full min-h-0 z-10" />
+
+                <div className="min-h-0 overflow-y-auto p-5 flex flex-col gap-4 border-t lg:border-t-0 lg:border-l border-mh-sep">
+                  <ul className="m-0 p-0 list-none flex flex-col gap-2" aria-label="Discoveries">
+                    {mission.fieldEvents.map((item) => {
+                      const m = FIELD_EVENT_META[item.class] ?? FIELD_EVENT_META['formation-interest'];
+                      const isSel = item.id === fe.id;
+                      return (
+                        <li key={item.id}>
+                          <button
+                            type="button"
+                            aria-pressed={isSel}
+                            onClick={() => selectFieldEvent(item)}
+                            className={`w-full min-h-11 p-3 rounded-mh-md border-2 cursor-pointer text-left text-mh-text flex items-center gap-3 ${
+                              isSel ? 'bg-mh-fill-blue border-mh-primary' : 'bg-mh-fill border-transparent'
+                            }`}
+                          >
+                            <span className="text-[18px] leading-none shrink-0" style={{ color: m.color }} aria-hidden="true">
+                              ◆
+                            </span>
+                            <span className="min-w-0 flex flex-col">
+                              <span className="text-base font-semibold">{item.id}</span>
+                              <span className="text-base text-mh-text2">{m.label}</span>
+                            </span>
+                            {item.promotedPoiId && (
+                              <span className="mh-pill mh-pill--ok ml-auto shrink-0">{item.promotedPoiId}</span>
+                            )}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+
+                  <section className="flex flex-col gap-3" aria-label={`${fe.id} details`}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className="mh-pill"
+                        style={{ background: `${meta.color}26`, color: 'var(--mh-text)' }}
+                      >
+                        {meta.label}
+                      </span>
+                      <span className={`mh-pill ${fe.status === 'confirmed' ? 'mh-pill--ok' : 'mh-pill--warn'}`}>
+                        {fe.status === 'confirmed' ? 'Confirmed' : 'Needs review'}
+                      </span>
+                      <span className="mh-pill mh-pill--info">
+                        Confidence {Math.round(fe.confidence * 100)}%
+                      </span>
+                    </div>
+                    <h3 className="m-0 text-[20px] leading-tight font-bold">{fe.title}</h3>
+                    <p className="m-0 text-base">{fe.description}</p>
+                    <dl className="m-0 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {[
+                        ['Logged', fe.ts],
+                        ['Source', fe.source],
+                        ['Method', fe.method],
+                        ['Image', fe.photo],
+                        ['Location', `${fe.lat.toFixed(4)}° N · ${fe.lon.toFixed(4)}° E`],
+                        ['MOLA elevation', `${estimateJezeroMolaElevation(fe.lat, fe.lon)} m`]
+                      ].map(([k, v]) => (
+                        <div key={k} className="flex flex-col gap-0.5 min-w-0">
+                          <dt className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">{k}</dt>
+                          <dd className="m-0 text-base break-words">{v}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                    <div className="mh-tile !gap-1">
+                      <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">
+                        Field directive
+                      </span>
+                      <span className="text-base">{fe.actionDirective}</span>
+                    </div>
+
+                    {fe.promotedPoiId ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="mh-pill mh-pill--ok">Added as {fe.promotedPoiId}</span>
+                        {linkedPoi && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowFieldMap(false);
+                              openPoiPopup(linkedPoi);
+                            }}
+                            className="mh-btn mh-btn--tinted"
+                          >
+                            <Flag className="w-5 h-5" />
+                            <span>Show on main map</span>
+                          </button>
+                        )}
+                      </div>
+                    ) : fe.id === 'FE-024-003' ? (
+                      // Scripted demo discovery: promoting it runs the 12-min funnel (Demo Sol 2)
+                      <button
+                        type="button"
+                        onClick={() => handleRunRapidFunnelAndPromote(fe.id)}
+                        className="mh-btn mh-btn--primary self-start"
+                      >
+                        <PlusCircle className="w-5 h-5" />
+                        <span>Promote to POI-4 (12-min funnel)</span>
+                      </button>
+                    ) : (
+                      <div className="flex flex-wrap items-end gap-2">
+                        <div>
+                          <label htmlFor="fe-poi-priority" className="mh-label">
+                            Priority
+                          </label>
+                          <select
+                            id="fe-poi-priority"
+                            className="mh-input !w-auto cursor-pointer"
+                            value={fieldPoiPriority}
+                            onChange={(e) => setFieldPoiPriority(e.target.value)}
+                          >
+                            <option value="HIGH">High</option>
+                            <option value="MED">Medium</option>
+                            <option value="LOW">Low</option>
+                          </select>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleAddPoiFromFieldEvent(fe, fieldPoiPriority)}
+                          className="mh-btn mh-btn--primary"
+                        >
+                          <PlusCircle className="w-5 h-5" />
+                          <span>Add as POI</span>
+                        </button>
+                      </div>
+                    )}
+                  </section>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ═══════════════════════════════════════════════════════════════════════
           EVIDENCE & PDS SOURCES SLIDE-OVER DRAWER
          ═══════════════════════════════════════════════════════════════════════ */}
       {showEvidenceDrawer && (
@@ -2961,10 +3331,9 @@ function LegendSection({ title, children }) {
 }
 
 function MapLegend({ currentRole, activeFilters, routes, selectedRoute, fusionPct }) {
-  const [open, setOpen] = useState(() =>
-    typeof window === 'undefined' ? true : window.innerWidth >= 640
-  );
+  const [open, setOpen] = useState(false); // closed by default: the map stays clean
   const notHud = currentRole !== 'astronaut';
+  const showFieldEvents = currentRole !== 'scientist'; // scientist sees them in the Field discoveries map
   const showFusion = activeFilters.filter1_spectralFusion && notHud;
   const showThermal = activeFilters.filter2_thermalInertia && notHud;
   const showHazards = activeFilters.topographySlope || currentRole === 'control';
@@ -3087,12 +3456,8 @@ function MapLegend({ currentRole, activeFilters, routes, selectedRoute, fusionPc
             </LegendSection>
           )}
 
-          <LegendSection title="Field events & markers">
-            {[
-              ['#38bdf8', 'Formation of interest'],
-              ['#E5484D', 'Boulder hazard'],
-              ['#E5C04A', 'Soft soil']
-            ].map(([c, label]) => (
+          <LegendSection title={showFieldEvents ? 'Field events & markers' : 'Markers'}>
+            {(showFieldEvents ? Object.values(FIELD_EVENT_META) : []).map(({ color: c, label }) => (
               <LegendRow
                 key={label}
                 swatch={<span className="font-mono text-[15px] leading-none" style={{ color: c }}>◆</span>}
