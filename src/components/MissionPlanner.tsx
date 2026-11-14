@@ -36,7 +36,11 @@ import {
   FastForward,
   Sun,
   Moon,
-  SunMoon
+  SunMoon,
+  Flag,
+  ChevronDown,
+  Users,
+  HeartPulse
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -131,7 +135,9 @@ const JEZERO_RASTER_CATALOG = [
     url: trekUrl('THEMIS_NightIR_ControlledMosaics_100m_v2_oct2018', 'png'),
     maxNative: 9,
     defaultOpacity: 0.65,
-    coveragePct: 95
+    coveragePct: 95,
+    // Grayscale night IR re-coloured with a red–blue (RdBu) SVG filter, see THERMAL_RDBU_STOPS
+    className: 'mh-thermal-rdbu'
   },
   {
     id: 'tesClay',
@@ -581,6 +587,198 @@ const JEZERO_NOT_EVALUATED_ZONES = [
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// §3 MAP SYMBOLOGY, REALISTIC ROUTE GEOMETRY & CREW STATUS (DEMO DATA)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// POI flag colours by scientific importance (fixed hex: must stay legible over Mars imagery)
+const POI_FLAG_COLORS = {
+  HIGH: '#E5484D',
+  MED: '#F5A524',
+  LOW: '#5B82C9'
+};
+
+// THEMIS Night IR colormap: cold (low thermal inertia: sand/dust) → warm (high inertia: bedrock)
+const THERMAL_RDBU_STOPS = ['#2166ac', '#67a9cf', '#f7f7f7', '#ef8a62', '#b2182b'];
+
+// Radiation dose rates used for route estimates (from weatherCard.radContext)
+const DOSE_RATE_NOMINAL_UGY_H = 9.1;
+const DOSE_RATE_SEP_UGY_H = 820;
+
+const escapeHtml = (value) =>
+  String(value ?? '').replace(
+    /[&<>"']/g,
+    (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]
+  );
+
+// Deterministic PRNG so every route keeps the same "hand-walked" shape across renders
+const hashString = (str) =>
+  [...str].reduce((h, c) => (Math.imul(h, 31) + c.charCodeAt(0)) >>> 0, 2166136261);
+const seededRandom = (seed) => {
+  let s = seed >>> 0;
+  return () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+};
+
+// Turns straight waypoint-to-waypoint segments into a meandering, terrain-following
+// path. The path still passes exactly through every waypoint (POIs, HAB, shelter):
+// only the in-between geometry is displaced. Data in mission.routes stays unchanged.
+const toRealisticPath = (coords, seedKey) => {
+  if (!coords || coords.length < 2) return coords;
+  const rand = seededRandom(hashString(seedKey));
+  const out = [coords[0]];
+  for (let i = 0; i < coords.length - 1; i++) {
+    const [lat1, lon1] = coords[i];
+    const [lat2, lon2] = coords[i + 1];
+    const dLat = lat2 - lat1;
+    const dLon = lon2 - lon1;
+    const len = Math.hypot(dLat, dLon);
+    if (len === 0) continue;
+    const steps = Math.max(8, Math.round(len / 0.00025)); // one vertex every ~15 m
+    const nLat = -dLon / len; // unit normal to the segment
+    const nLon = dLat / len;
+    const amp = Math.min(len * 0.09, 0.0006); // max lateral detour ≈ 35 m
+    const f1 = 1 + Math.floor(rand() * 2);
+    const f2 = 3 + Math.floor(rand() * 3);
+    const p1 = rand() * Math.PI * 2;
+    const p2 = rand() * Math.PI * 2;
+    const a1 = (0.6 + rand() * 0.4) * (rand() < 0.5 ? -1 : 1);
+    for (let k = 1; k < steps; k++) {
+      const t = k / steps;
+      const envelope = Math.sin(Math.PI * t); // 0 at both waypoints
+      const wobble =
+        0.75 * a1 * Math.sin(2 * Math.PI * f1 * t + p1) +
+        0.25 * Math.sin(2 * Math.PI * f2 * t + p2) +
+        (rand() - 0.5) * 0.15;
+      const off = amp * envelope * wobble;
+      out.push([lat1 + dLat * t + nLat * off, lon1 + dLon * t + nLon * off]);
+    }
+    out.push(coords[i + 1]);
+  }
+  return out;
+};
+
+const flagSvg = (color, label = '', size = 1) =>
+  `<svg width="${30 * size}" height="${36 * size}" viewBox="0 0 30 36" aria-hidden="true">` +
+  `<line x1="5" y1="3" x2="5" y2="34" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round"/>` +
+  `<line x1="5" y1="3" x2="5" y2="34" stroke="#1C1C1E" stroke-width="1.6" stroke-linecap="round"/>` +
+  `<path d="M6 3.5 H27 L21.5 10.5 L27 17.5 H6 Z" fill="${color}" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/>` +
+  (label
+    ? `<text x="14.5" y="14" text-anchor="middle" font-size="9.5" font-weight="700" fill="#ffffff" font-family="DM Mono, ui-monospace, monospace">${escapeHtml(label)}</text>`
+    : '') +
+  `</svg>`;
+
+// Orbital context for a scientist-added POI, inferred from the CRISM prior zones drawn on the map
+const inferOrbitalContext = (lat, lon) => {
+  if (lat >= 18.4415 && lat <= 18.4535 && lon >= 77.4455 && lon <= 77.4605) {
+    return {
+      mineral: 'MRO/CRISM: Fe/Mg Smectite Clay prior zone (Delta Front, 18 m/px)',
+      hydrationEst: '4.2 wt% H2O',
+      uncertainty: '±32%'
+    };
+  }
+  if (lat >= 18.4235 && lat <= 18.4365 && lon >= 77.4535 && lon <= 77.4665) {
+    return {
+      mineral: 'MRO/CRISM: Regional Olivine + Mg-Carbonate prior zone (Séítah, 18 m/px)',
+      hydrationEst: '2.5 wt% H2O',
+      uncertainty: '±36%'
+    };
+  }
+  return {
+    mineral: 'MRO/CRISM: No dominant prior signature (crater-floor basaltic regolith)',
+    hydrationEst: '~2.0 wt% H2O',
+    uncertainty: '±40%'
+  };
+};
+
+// Leaflet popup shown when a POI flag is clicked: what a field geologist wants to see
+const buildPoiPopupHtml = (poi) => {
+  const color = POI_FLAG_COLORS[poi.priority] ?? POI_FLAG_COLORS.LOW;
+  const priorityLabel = { HIGH: 'High', MED: 'Medium', LOW: 'Low' }[poi.priority] ?? 'Low';
+  const post = poi.pdsInSituPosterior;
+  const prior = poi.orbitalPrior;
+  const pending = poi.dataConfidence === 'orbital-only';
+  const row = (k, v) =>
+    `<div class="mh-poi-popup__row"><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd></div>`;
+  return `
+    <div class="mh-poi-popup">
+      <div class="mh-poi-popup__head">
+        <span class="mh-poi-popup__chip" style="background:${color}">${priorityLabel} priority</span>
+        <span class="mh-poi-popup__id">${escapeHtml(poi.id)}${poi.postponedInSol3 ? ' · postponed' : ''}</span>
+      </div>
+      <strong class="mh-poi-popup__title">${escapeHtml(poi.name)}</strong>
+      <dl>
+        ${row('Geological unit', poi.feature)}
+        ${row('Location', `${poi.lat.toFixed(4)}° N · ${poi.lon.toFixed(4)}° E · MOLA ${poi.elevM} m`)}
+        ${row('Orbital mineralogy (prior)', `${prior.mineral} · ${prior.hydrationEst} · σ ${prior.uncertainty}`)}
+        ${
+          pending
+            ? row('In-situ composition', 'Not sampled yet — run the 12-min handheld funnel to replace the orbital prior.')
+            : row('Elemental chemistry (PIXL XRF)', post.pixl) +
+              row('Mineral phases (SHERLOC Raman)', post.sherloc) +
+              row('Texture (SuperCam)', post.supercam) +
+              row('Hydration (posterior)', `${post.hydrationPosterior} · σ ${post.uncertaintyAfter}`)
+        }
+        ${row('Biosignature potential', post.biosignatureRating)}
+      </dl>
+      <span class="mh-poi-popup__src">${escapeHtml(poi.sourceBadge)}</span>
+    </div>`;
+};
+
+const formatDose = (ugy) =>
+  ugy >= 1000 ? `${(ugy / 1000).toFixed(2)} mGy` : `${ugy.toFixed(1)} µGy`;
+
+const addMinutesToLst = (hhmm, minutes) => {
+  const [h, m] = hhmm.split(':').map(Number);
+  const total = (((h * 60 + m + minutes) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+};
+
+const formatDuration = (minutes) => `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')} min`;
+
+// Simulated crew roster for Mission Control (demo data — not real telemetry).
+// Surface dose = cumulative since landing (Sol 1 → today), planned vs measured by suit dosimeter.
+const CREW_ROSTER = [
+  {
+    id: 'EV1',
+    name: 'Cmdr. Lena Okafor',
+    role: 'EVA lead · Field geology',
+    onEva: true,
+    evasCompleted: 7,
+    dosePlannedMsv: 15.4,
+    doseActualMsv: 14.9,
+    vitals: { heartRate: 88, spo2: 97, sleepH: 7.1 },
+    fatigue: 'Low',
+    psych: 'Nominal (Sol 23 check-in)'
+  },
+  {
+    id: 'EV2',
+    name: 'Dr. Samir Haddad',
+    role: 'EVA · Astrobiology & sampling',
+    onEva: true,
+    evasCompleted: 6,
+    dosePlannedMsv: 15.4,
+    doseActualMsv: 15.6,
+    vitals: { heartRate: 101, spo2: 96, sleepH: 5.9 },
+    fatigue: 'Moderate',
+    psych: 'Nominal · reports short sleep'
+  },
+  {
+    id: 'IV',
+    name: 'Eng. Rui Tanaka',
+    role: 'IV operator · HAB & comms',
+    onEva: false,
+    evasCompleted: 3,
+    dosePlannedMsv: 12.6,
+    doseActualMsv: 12.2,
+    vitals: { heartRate: 72, spo2: 98, sleepH: 7.6 },
+    fatigue: 'Low',
+    psych: 'Nominal'
+  }
+];
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // MAIN APPLICATION COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function MissionPlanner() {
@@ -635,6 +833,8 @@ export default function MissionPlanner() {
   const [showEvidenceDrawer, setShowEvidenceDrawer] = useState(false);
   const [showJsonModal, setShowJsonModal] = useState(false);
   const [toastMsg, setToastMsg] = useState(null);
+  // Scientist "Add POI" draft (null = form closed). Location = the currently selected map point.
+  const [newPoiDraft, setNewPoiDraft] = useState(null);
 
   // Mission Hub theme: 'auto' follows the device, 'light' / 'dark' force it
   const [themePref, setThemePref] = useState(() => {
@@ -670,6 +870,8 @@ export default function MissionPlanner() {
     clickPin: null
   });
   const waypointsRef = useRef(FALLBACK_M20_WAYPOINTS);
+  // Flips once the async Leaflet init finishes, so overlays (flags, routes, rasters) draw on first load
+  const [mapReady, setMapReady] = useState(false);
 
   const triggerToast = (msg) => {
     setToastMsg(msg);
@@ -678,6 +880,27 @@ export default function MissionPlanner() {
 
   const appendStatus = (line) => {
     setMapStatusLog((prev) => [...prev.slice(-6), line]);
+  };
+
+  // Selects a POI and opens its geology/composition popup. The popup is map-level
+  // (not bound to the marker) so it survives the marker redraw that selection triggers.
+  const openPoiPopup = (poi) => {
+    setSelectedPoiId(poi.id);
+    const map = mapInstanceRef.current;
+    const L = window.L;
+    if (!map || !L) return;
+    L.popup({
+      className: 'mh-leaflet-popup',
+      maxWidth: 320,
+      minWidth: 240,
+      offset: [10, -30],
+      // keep the popup clear of the legend (top-left) and zoom buttons (top-right)
+      autoPanPaddingTopLeft: [window.innerWidth >= 640 ? 290 : 24, 24],
+      autoPanPaddingBottomRight: [72, 24]
+    })
+      .setLatLng([poi.lat, poi.lon])
+      .setContent(buildPoiPopupHtml(poi))
+      .openOn(map);
   };
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -751,14 +974,20 @@ export default function MissionPlanner() {
       }
 
       // 2. Inject Leaflet 1.9.4 JS if not already on window.L
+      //    Reuse a pending <script> (React StrictMode runs this effect twice in dev):
+      //    loading Leaflet twice creates two `L` copies and breaks instanceof checks.
       if (!window.L) {
         await new Promise((resolve, reject) => {
-          const script = document.createElement('script');
-          script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-          script.async = true;
-          script.onload = resolve;
-          script.onerror = reject;
-          document.body.appendChild(script);
+          let script = document.getElementById('leaflet-js-194');
+          if (!script) {
+            script = document.createElement('script');
+            script.id = 'leaflet-js-194';
+            script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+            script.async = true;
+            document.body.appendChild(script);
+          }
+          script.addEventListener('load', resolve, { once: true });
+          script.addEventListener('error', reject, { once: true });
         });
       }
 
@@ -800,7 +1029,8 @@ export default function MissionPlanner() {
             [90, 180]
           ],
           opacity: cfg.defaultOpacity,
-          zIndex: 10 + idx
+          zIndex: 10 + idx,
+          className: cfg.className ?? ''
         });
         tileLayersRef.current[cfg.id] = lyr;
       });
@@ -855,6 +1085,7 @@ export default function MissionPlanner() {
       });
 
       mapInstanceRef.current = map;
+      setMapReady(true);
       appendStatus('Jezero L.CRS.EPSG4326 map ready. HiRISE 25 cm/px active at zoom 14–17.');
 
       // 7. Fetch Live Perseverance Traverse & Waypoints from MMGIS (with fallback)
@@ -1014,6 +1245,8 @@ export default function MissionPlanner() {
 
       // B) BAYESIAN POSTERIOR UPDATED BY IN-SITU PDS SUPERCAM + PIXL + SHERLOC
       mission.pois.forEach((poi) => {
+        // Scientist-added targets have no in-situ data yet → no posterior ring
+        if (poi.dataConfidence === 'orbital-only') return;
         // High-confidence tight posterior ring around each PDS-measured outcrop
         L.circle([poi.lat, poi.lon], {
           radius: 190,
@@ -1125,7 +1358,8 @@ export default function MissionPlanner() {
           return;
         }
 
-        L.polyline(rt.coords, {
+        // Realistic, terrain-following geometry (still passes through every waypoint)
+        L.polyline(toRealisticPath(rt.coords, rt.id), {
           color: rt.color,
           weight: isSelected ? 6 : 3.5,
           opacity: isSelected ? 0.98 : 0.55,
@@ -1186,51 +1420,34 @@ export default function MissionPlanner() {
       marker.addTo(feGroup);
     });
 
-    // 7. Render Prioritized PDS POI Markers (1 = Red HIGH, 2 = Amber MED, 3 = Gray LOW)
+    // 7. Render POIs as compact flags coloured by importance (HIGH red · MED amber · LOW blue).
+    //    The number on the flag is the visit order; click → geology & composition popup.
     const poiGroup = vectorGroupsRef.current.pois;
     poiGroup.clearLayers();
     const sortedPois = [...mission.pois].sort((a, b) => a.order - b.order);
 
     sortedPois.forEach((poi) => {
-      const bg =
-        poi.priority === 'HIGH' || poi.order === 1
-          ? 'var(--mh-accent)'
-          : poi.priority === 'MED' || poi.order === 2
-          ? 'var(--mh-warn)'
-          : 'var(--mh-text2)';
-      const fg = 'var(--mh-card)';
+      const color = POI_FLAG_COLORS[poi.priority] ?? POI_FLAG_COLORS.LOW;
       const isSelected = selectedPoiId === poi.id;
-
-      const poiHtml = `
-        <div style="display:flex;align-items:center;gap:8px;background:var(--mh-card);border:2px solid ${
-          isSelected ? 'var(--mh-primary)' : bg
-        };padding:4px 12px 4px 4px;border-radius:999px;box-shadow:0 3px 12px rgba(0,0,0,0.35);white-space:nowrap;">
-          <span style="width:24px;height:24px;border-radius:50%;background:${bg};color:${fg};font-family:var(--mh-font-mono);font-weight:500;font-size:12px;display:flex;align-items:center;justify-content:center;">
-            ${poi.order}
-          </span>
-          <div>
-            <div style="color:var(--mh-text);font-family:var(--mh-font);font-weight:700;font-size:12px;line-height:1.2;">
-              ${poi.id}: ${poi.name.split('(')[0].trim()}
-            </div>
-            <div style="color:var(--mh-ok);font-family:var(--mh-font-mono);font-size:11px;">
-              PDS: ${poi.pdsInSituPosterior.hydrationPosterior} (${poi.pdsInSituPosterior.uncertaintyAfter})
-            </div>
-          </div>
-        </div>
-      `;
+      const cls = `mh-poi-flag${isSelected ? ' is-selected' : ''}${poi.postponedInSol3 ? ' is-postponed' : ''}`;
 
       const icon = L.divIcon({
         className: '',
-        html: poiHtml,
-        iconSize: [210, 38],
-        iconAnchor: [20, 19]
+        html: `<div class="${cls}">${flagSvg(color, String(poi.order))}</div>`,
+        iconSize: [30, 36],
+        iconAnchor: [5, 34],
+        tooltipAnchor: [12, -24]
       });
 
-      const m = L.marker([poi.lat, poi.lon], { icon });
-      m.on('click', () => setSelectedPoiId(poi.id));
+      const m = L.marker([poi.lat, poi.lon], {
+        icon,
+        zIndexOffset: isSelected ? 1000 : 0
+      });
+      m.bindTooltip(`${poi.id} · ${poi.name.split('(')[0].trim()}`, { direction: 'right' });
+      m.on('click', () => openPoiPopup(poi));
       m.addTo(poiGroup);
     });
-  }, [activeFilters, currentRole, mission, rasterOpacities, selectedPoiId, sepAlertActive]);
+  }, [mapReady, activeFilters, currentRole, mission, rasterOpacities, selectedPoiId, sepAlertActive]);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // ACTION: EXECUTE 12-MINUTE HANDHELD FUNNEL & PROMOTE FIELD DISCOVERY TO POI
@@ -1294,11 +1511,8 @@ export default function MissionPlanner() {
         ? prev.pois.map((p) => (p.id === newPoiId ? promotedPoi : p))
         : [
             promotedPoi,
-            ...prev.pois.map((p) => ({
-              ...p,
-              order: p.order + 1,
-              priority: p.order + 1 === 2 ? 'HIGH' : p.order + 1 === 3 ? 'MED' : 'LOW'
-            }))
+            // Priority is independent of visit order: only shift the order
+            ...prev.pois.map((p) => ({ ...p, order: p.order + 1 }))
           ];
 
       return {
@@ -1339,7 +1553,8 @@ export default function MissionPlanner() {
     );
   };
 
-  // Reorder POI Priority Up/Down
+  // Reorder POI visit order Up/Down. Scientific priority is NOT derived from position
+  // any more: it is set explicitly with handleSetPoiPriority.
   const handleMovePoiOrder = (poiId, direction) => {
     const sorted = [...mission.pois].sort((a, b) => a.order - b.order);
     const idx = sorted.findIndex((p) => p.id === poiId);
@@ -1348,12 +1563,65 @@ export default function MissionPlanner() {
     const temp = sorted[idx];
     sorted[idx] = sorted[swapIdx];
     sorted[swapIdx] = temp;
-    const reindexed = sorted.map((p, i) => ({
-      ...p,
-      order: i + 1,
-      priority: i === 0 ? 'HIGH' : i === 1 ? 'MED' : 'LOW'
-    }));
+    const reindexed = sorted.map((p, i) => ({ ...p, order: i + 1 }));
     setMission((prev) => ({ ...prev, pois: reindexed }));
+  };
+
+  // Set a POI's scientific importance directly (drives the flag colour on the map)
+  const handleSetPoiPriority = (poiId, priority) => {
+    setMission((prev) => ({
+      ...prev,
+      pois: prev.pois.map((p) => (p.id === poiId ? { ...p, priority } : p))
+    }));
+  };
+
+  // Scientist adds a new POI at the currently selected map point
+  const handleAddScientistPoi = () => {
+    if (!newPoiDraft) return;
+    const { lat, lon, molaElevationM } = clickedPoint;
+    const nextNum =
+      mission.pois.reduce(
+        (max, p) => (p.id.startsWith('SCI-') ? Math.max(max, Number(p.id.slice(4)) || 0) : max),
+        0
+      ) + 1;
+    const id = `SCI-${nextNum}`; // own prefix: never collides with the demo's POI-4 promotion
+    const ctx = inferOrbitalContext(lat, lon);
+    const name = newPoiDraft.name.trim() || `Science target ${nextNum}`;
+
+    const newPoi = {
+      id,
+      order: mission.pois.length + 1,
+      name,
+      feature: newPoiDraft.note.trim() || 'Scientist-flagged outcrop (awaiting in-situ funnel)',
+      priority: newPoiDraft.priority,
+      lat,
+      lon,
+      elevM: molaElevationM,
+      sourceBadge: 'Added by Science team · map pick + MOLA elevation',
+      dataConfidence: 'orbital-only',
+      activities: ['Stand-off SuperCam', 'Surface Abrasion', 'PIXL + SHERLOC Contact'],
+      durationMin: 35,
+      roverEquivalentSols: 4,
+      astronautFunnelMin: 12,
+      orbitalPrior: ctx,
+      pdsInSituPosterior: {
+        supercam: 'Pending — not sampled yet',
+        abrasion: 'Pending — not sampled yet',
+        pixl: 'Pending — not sampled yet',
+        sherloc: 'Pending — not sampled yet',
+        hydrationPosterior: 'Pending',
+        uncertaintyAfter: ctx.uncertainty,
+        biosignatureRating: 'TBD (awaiting in-situ funnel)'
+      }
+    };
+
+    setMission((prev) => ({
+      ...prev,
+      pois: [...prev.pois, { ...newPoi, order: prev.pois.length + 1 }]
+    }));
+    setSelectedPoiId(id);
+    setNewPoiDraft(null);
+    triggerToast(`New target ${id} "${name}" added to the map (${PRIORITY_META[newPoi.priority].label} priority).`);
   };
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1437,6 +1705,26 @@ export default function MissionPlanner() {
       mission.planVersions.find((v) => v.version === mission.activePlanVersion) ||
       mission.planVersions[0],
     [mission.planVersions, mission.activePlanVersion]
+  );
+
+  // Mission Control: crew status reacts to the demo stepper (Sol 2 = EVA in progress, Sol 3 = SEP)
+  const crewStatus = useMemo(
+    () =>
+      CREW_ROSTER.map((c) => {
+        const evaToday = mission.demoScriptSol >= 2 && c.onEva ? 0.04 : 0;
+        const sepExtra = sepAlertActive ? (c.onEva ? 1.6 : 0.35) : 0;
+        const doseActualMsv = +(c.doseActualMsv + evaToday + sepExtra).toFixed(2);
+        const doseDeltaPct = Math.round((doseActualMsv / c.dosePlannedMsv - 1) * 100);
+        const heartRate = c.vitals.heartRate + (sepAlertActive && c.onEva ? 14 : 0);
+        const health =
+          sepAlertActive && c.onEva
+            ? { label: 'Medical review', cls: 'mh-pill--crit' }
+            : c.fatigue === 'Moderate' || doseDeltaPct > 0
+            ? { label: 'Monitor', cls: 'mh-pill--warn' }
+            : { label: 'Nominal', cls: 'mh-pill--ok' };
+        return { ...c, doseActualMsv, doseDeltaPct, heartRate, health };
+      }),
+    [mission.demoScriptSol, sepAlertActive]
   );
 
   return (
@@ -1623,6 +1911,7 @@ export default function MissionPlanner() {
               <FilterToggle
                 on={activeFilters.filter1_spectralFusion}
                 onClick={() => handleToggleRoleFilter('filter1_spectralFusion')}
+                hint="Orbital CRISM/TES mineral zones (prior) vs. rings measured in situ by PIXL/SHERLOC (posterior)"
               >
                 CRISM prior ↔ PDS posterior
               </FilterToggle>
@@ -1630,6 +1919,7 @@ export default function MissionPlanner() {
                 <FilterToggle
                   on={activeFilters.filter2_thermalInertia}
                   onClick={() => handleToggleRoleFilter('filter2_thermalInertia')}
+                  hint="THEMIS night IR, red–blue colormap: red = warm/high thermal inertia (bedrock), blue = cold (loose sand & dust)"
                 >
                   THEMIS thermal (100 m)
                 </FilterToggle>
@@ -1637,6 +1927,7 @@ export default function MissionPlanner() {
                 <FilterToggle
                   on={activeFilters.topographySlope}
                   onClick={() => handleToggleRoleFilter('topographySlope')}
+                  hint="MOLA+HRSC hillshade, >15° slope segments (red) and not-evaluated zones (amber)"
                 >
                   Slope &amp; not-evaluated zones
                 </FilterToggle>
@@ -1644,8 +1935,9 @@ export default function MissionPlanner() {
               <FilterToggle
                 on={activeFilters.filter3_pdsTargetsTraverse}
                 onClick={() => handleToggleRoleFilter('filter3_pdsTargetsTraverse')}
+                hint="Perseverance rover traverse (orange dotted line) and its Sol waypoints from MMGIS/PDS. HiRISE 25 cm imagery is always on."
               >
-                HiRISE 25 cm + PDS targets
+                Perseverance traverse (PDS)
               </FilterToggle>
             </div>
           </div>
@@ -1653,6 +1945,41 @@ export default function MissionPlanner() {
           {/* Map */}
           <div className="relative h-[420px] sm:h-[520px] lg:h-[calc(100vh-30rem)] lg:min-h-[360px] lg:max-h-[720px]">
             <div ref={mapContainerRef} className="w-full h-full z-10" />
+
+            {/* SVG filter used by .mh-thermal-rdbu: grayscale THEMIS → red–blue colormap */}
+            <svg width="0" height="0" className="absolute" aria-hidden="true" focusable="false">
+              <defs>
+                <filter id="mh-thermal-rdbu" colorInterpolationFilters="sRGB">
+                  <feColorMatrix
+                    type="matrix"
+                    values="0.2126 0.7152 0.0722 0 0  0.2126 0.7152 0.0722 0 0  0.2126 0.7152 0.0722 0 0  0 0 0 1 0"
+                  />
+                  <feComponentTransfer>
+                    <feFuncR type="linear" slope="1.5" intercept="-0.25" />
+                    <feFuncG type="linear" slope="1.5" intercept="-0.25" />
+                    <feFuncB type="linear" slope="1.5" intercept="-0.25" />
+                  </feComponentTransfer>
+                  <feComponentTransfer>
+                    <feFuncR type="table" tableValues="0.129 0.404 0.969 0.937 0.698" />
+                    <feFuncG type="table" tableValues="0.400 0.663 0.969 0.541 0.094" />
+                    <feFuncB type="table" tableValues="0.675 0.812 0.969 0.384 0.169" />
+                  </feComponentTransfer>
+                </filter>
+              </defs>
+            </svg>
+
+            <MapLegend
+              currentRole={currentRole}
+              activeFilters={activeFilters}
+              routes={Object.values(mission.routes).filter(
+                (rt) =>
+                  currentRole !== 'astronaut' ||
+                  rt.id === mission.selectedRoute ||
+                  (sepAlertActive && rt.id === 'SHELTER')
+              )}
+              selectedRoute={mission.selectedRoute}
+              fusionPct={mission.fusionSliderPct}
+            />
 
             <div className="absolute top-3 right-3 z-20 flex flex-col gap-2">
               <button
@@ -1705,39 +2032,98 @@ export default function MissionPlanner() {
               <p className="m-0 text-base text-mh-text2">Click the map to inspect a point.</p>
             </div>
 
-            <div className="mh-tile">
-              <div className="flex items-baseline justify-between gap-2">
-                <label htmlFor="fusion-slider" className="mh-eyebrow">
-                  Data fusion
-                </label>
-                <span className="text-base font-semibold">{mission.fusionSliderPct}% posterior</span>
+            {/* Scientist: add a new POI at the selected point */}
+            {currentRole === 'scientist' && (
+              <div className="mh-tile !gap-3">
+                <span className="mh-eyebrow">
+                  <Flag className="w-4 h-4" aria-hidden="true" />
+                  New target
+                </span>
+                {!newPoiDraft ? (
+                  <>
+                    <p className="m-0 text-base text-mh-text2">
+                      Click the map to choose a spot, then add it as a POI flag.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setNewPoiDraft({ name: '', priority: 'MED', note: '' })}
+                      className="mh-btn mh-btn--tinted self-start"
+                    >
+                      <PlusCircle className="w-5 h-5" />
+                      <span>Add POI at selected point</span>
+                    </button>
+                  </>
+                ) : (
+                  <form
+                    className="flex flex-col gap-3"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleAddScientistPoi();
+                    }}
+                  >
+                    <div>
+                      <label htmlFor="new-poi-name" className="mh-label">
+                        Name
+                      </label>
+                      <input
+                        id="new-poi-name"
+                        className="mh-input !bg-mh-card select-text"
+                        placeholder="e.g. Bright fracture fill"
+                        maxLength={60}
+                        value={newPoiDraft.name}
+                        onChange={(e) => setNewPoiDraft((d) => ({ ...d, name: e.target.value }))}
+                        autoFocus
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="new-poi-note" className="mh-label">
+                        Why it matters (optional)
+                      </label>
+                      <input
+                        id="new-poi-note"
+                        className="mh-input !bg-mh-card select-text"
+                        placeholder="e.g. Possible hydrated silica vein"
+                        maxLength={120}
+                        value={newPoiDraft.note}
+                        onChange={(e) => setNewPoiDraft((d) => ({ ...d, note: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="new-poi-priority" className="mh-label">
+                        Priority
+                      </label>
+                      <select
+                        id="new-poi-priority"
+                        className="mh-input !bg-mh-card cursor-pointer"
+                        value={newPoiDraft.priority}
+                        onChange={(e) => setNewPoiDraft((d) => ({ ...d, priority: e.target.value }))}
+                      >
+                        <option value="HIGH">High</option>
+                        <option value="MED">Medium</option>
+                        <option value="LOW">Low</option>
+                      </select>
+                    </div>
+                    <p className="m-0 text-base text-mh-text2 font-mono">
+                      {clickedPoint.lat.toFixed(5)}° N · {clickedPoint.lon.toFixed(5)}° E ·{' '}
+                      {clickedPoint.molaElevationM} m
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="submit" className="mh-btn mh-btn--primary">
+                        <Flag className="w-5 h-5" />
+                        <span>Place flag</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNewPoiDraft(null)}
+                        className="mh-btn bg-mh-card text-mh-text"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                )}
               </div>
-              <input
-                id="fusion-slider"
-                type="range"
-                min="0"
-                max="100"
-                value={mission.fusionSliderPct}
-                disabled={currentRole === 'astronaut'}
-                onChange={(e) =>
-                  setMission((prev) => ({ ...prev, fusionSliderPct: Number(e.target.value) }))
-                }
-                className="w-full h-11 cursor-pointer disabled:cursor-not-allowed"
-                aria-valuetext={`${mission.fusionSliderPct}% PDS posterior`}
-              />
-              <div
-                className="h-2.5 rounded-full"
-                aria-hidden="true"
-                style={{
-                  background:
-                    'linear-gradient(90deg, #a855f7 0%, #E5C04A 25%, #38bdf8 60%, #35B17A 100%)'
-                }}
-              />
-              <div className="flex justify-between gap-2 text-base text-mh-text2">
-                <span>CRISM prior · σ ±34%</span>
-                <span>PDS posterior · σ ±3.8%</span>
-              </div>
-            </div>
+            )}
           </div>
         </section>
 
@@ -1750,6 +2136,8 @@ export default function MissionPlanner() {
                 eyebrow="Decision next to data"
                 title="Decision funnel: rover 4 sols → astronaut 12 min"
                 icon={FastForward}
+                collapsible
+                defaultOpen={false}
               >
                 <p className="m-0 text-base text-mh-text2">
                   An uncrewed rover needs at least one ground-planning Sol per stage. Handheld
@@ -1785,6 +2173,7 @@ export default function MissionPlanner() {
                     </span>
                   }
                   highlight
+                  collapsible
                 >
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="mh-tile">
@@ -1824,6 +2213,7 @@ export default function MissionPlanner() {
                 eyebrow="Field discoveries"
                 title="In-situ discoveries & target priority"
                 subtitle="Promote a discovery to update the CRISM posterior and the route plan."
+                collapsible
               >
                 {mission.fieldEvents
                   .filter((fe) => fe.id === 'FE-024-003')
@@ -1851,60 +2241,90 @@ export default function MissionPlanner() {
                     </div>
                   ))}
 
-                <ol className="m-0 p-0 list-none flex flex-col gap-2" aria-label="Targets by priority">
+                <p className="m-0 text-base text-mh-text2">
+                  <strong className="text-mh-text">Priority</strong> sets the flag colour on the map;
+                  the arrows only change the <strong className="text-mh-text">visit order</strong>{' '}
+                  (number on the flag).
+                </p>
+                <ol className="m-0 p-0 list-none flex flex-col gap-2" aria-label="Targets by visit order">
                   {sortedPois.map((poi, idx) => {
                     const isSel = selectedPoiId === poi.id;
-                    const pr = PRIORITY_META[poi.priority] ?? PRIORITY_META.LOW;
                     return (
                       <li
                         key={poi.id}
-                        className={`flex items-center gap-3 p-3 rounded-mh-md transition-colors ${
+                        className={`flex flex-col gap-2 p-3 rounded-mh-md transition-colors ${
                           isSel ? 'bg-mh-fill-blue' : 'bg-mh-fill'
                         }`}
                       >
                         <button
                           type="button"
                           onClick={() => {
-                            setSelectedPoiId(poi.id);
+                            openPoiPopup(poi);
                             mapInstanceRef.current?.panTo([poi.lat, poi.lon]);
                           }}
                           aria-pressed={isSel}
-                          className="flex-1 min-w-0 min-h-11 flex items-center gap-3 text-left bg-transparent border-0 p-0 cursor-pointer text-mh-text"
+                          className="w-full min-w-0 min-h-11 flex items-center gap-3 text-left bg-transparent border-0 p-0 cursor-pointer text-mh-text"
                         >
-                          <span className="w-9 h-9 shrink-0 rounded-full bg-mh-card font-mono text-base flex items-center justify-center">
-                            {poi.order}
-                          </span>
+                          <span
+                            className="w-9 h-9 shrink-0 flex items-center justify-center"
+                            aria-hidden="true"
+                            dangerouslySetInnerHTML={{
+                              __html: flagSvg(
+                                POI_FLAG_COLORS[poi.priority] ?? POI_FLAG_COLORS.LOW,
+                                String(poi.order),
+                                0.9
+                              )
+                            }}
+                          />
                           <span className="min-w-0 flex flex-col gap-1">
                             <span className="text-base font-semibold">
                               {poi.id} · {poi.name.split('(')[0].trim()}
                             </span>
-                            <span className="flex flex-wrap items-center gap-2">
-                              <span className={`mh-pill ${pr.cls}`}>{pr.label}</span>
-                              <span className="text-base text-mh-text2">
-                                {poi.pdsInSituPosterior.hydrationPosterior}
-                              </span>
+                            <span className="text-base text-mh-text2">
+                              {poi.dataConfidence === 'orbital-only'
+                                ? 'Orbital prior only · not sampled yet'
+                                : `Hydration ${poi.pdsInSituPosterior.hydrationPosterior}`}
+                              {poi.postponedInSol3 ? ' · postponed' : ''}
                             </span>
                           </span>
                         </button>
-                        <div className="flex flex-col sm:flex-row gap-1 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => handleMovePoiOrder(poi.id, 'UP')}
-                            disabled={idx === 0}
-                            className="mh-btn mh-btn--icon bg-mh-card text-mh-text"
-                            aria-label={`Move ${poi.id} up`}
-                          >
-                            <ArrowUp className="w-5 h-5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleMovePoiOrder(poi.id, 'DOWN')}
-                            disabled={idx === sortedPois.length - 1}
-                            className="mh-btn mh-btn--icon bg-mh-card text-mh-text"
-                            aria-label={`Move ${poi.id} down`}
-                          >
-                            <ArrowDown className="w-5 h-5" />
-                          </button>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <label className="flex items-center gap-2 text-base text-mh-text2">
+                            <span>Priority</span>
+                            <select
+                              value={poi.priority}
+                              onChange={(e) => handleSetPoiPriority(poi.id, e.target.value)}
+                              className={`mh-pill ${
+                                (PRIORITY_META[poi.priority] ?? PRIORITY_META.LOW).cls
+                              } min-h-11 !px-3 border-0 cursor-pointer`}
+                              aria-label={`Priority of ${poi.id}`}
+                            >
+                              <option value="HIGH">High</option>
+                              <option value="MED">Medium</option>
+                              <option value="LOW">Low</option>
+                            </select>
+                          </label>
+                          <div className="flex items-center gap-1">
+                            <span className="text-base text-mh-text2 mr-1">Order</span>
+                            <button
+                              type="button"
+                              onClick={() => handleMovePoiOrder(poi.id, 'UP')}
+                              disabled={idx === 0}
+                              className="mh-btn mh-btn--icon bg-mh-card text-mh-text"
+                              aria-label={`Visit ${poi.id} earlier`}
+                            >
+                              <ArrowUp className="w-5 h-5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleMovePoiOrder(poi.id, 'DOWN')}
+                              disabled={idx === sortedPois.length - 1}
+                              className="mh-btn mh-btn--icon bg-mh-card text-mh-text"
+                              aria-label={`Visit ${poi.id} later`}
+                            >
+                              <ArrowDown className="w-5 h-5" />
+                            </button>
+                          </div>
                         </div>
                       </li>
                     );
@@ -1926,46 +2346,168 @@ export default function MissionPlanner() {
           {currentRole === 'control' && (
             <>
               <Card
+                eyebrow="Crew health & radiation"
+                title="Astronauts status"
+                icon={Users}
+                aside={<span className="mh-pill mh-pill--warn">Simulated telemetry</span>}
+                collapsible
+              >
+                {sepAlertActive && (
+                  <div className="mh-alert !bg-mh-crit-bg !text-mh-crit" role="alert">
+                    <AlertTriangle className="w-5 h-5 shrink-0" aria-hidden="true" />
+                    <p className="m-0 flex-1">
+                      <strong>SEP event:</strong> EVA crew dose above plan — flight surgeon review
+                      required.
+                    </p>
+                  </div>
+                )}
+                <ul className="m-0 p-0 list-none flex flex-col gap-3">
+                  {crewStatus.map((c) => {
+                    const fillPct = Math.min(100, (c.doseActualMsv / c.dosePlannedMsv) * 100);
+                    const over = c.doseDeltaPct > 0;
+                    return (
+                      <li key={c.id} className="mh-tile !gap-3">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <span className="flex flex-col min-w-0">
+                            <strong className="text-base">
+                              {c.id} · {c.name}
+                            </strong>
+                            <span className="text-base text-mh-text2">
+                              {c.role}
+                              {c.onEva && mission.demoScriptSol >= 2 ? ' · on EVA now' : ''}
+                            </span>
+                          </span>
+                          <span className={`mh-pill shrink-0 ${c.health.cls}`}>{c.health.label}</span>
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+                          <div className="flex flex-wrap items-baseline justify-between gap-2">
+                            <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">
+                              Radiation dose (surface, cumulative)
+                            </span>
+                            <span className={`text-base font-semibold ${over ? 'text-mh-crit' : ''}`}>
+                              {c.doseActualMsv.toFixed(2)} / {c.dosePlannedMsv.toFixed(1)} mSv
+                            </span>
+                          </div>
+                          <div
+                            className="mh-progress"
+                            role="meter"
+                            aria-valuemin={0}
+                            aria-valuemax={c.dosePlannedMsv}
+                            aria-valuenow={c.doseActualMsv}
+                            aria-label={`${c.id} measured dose versus planned`}
+                          >
+                            <span
+                              style={{
+                                width: `${fillPct}%`,
+                                background: over ? 'var(--mh-crit)' : 'var(--mh-ok)'
+                              }}
+                            />
+                          </div>
+                          <span className="text-base text-mh-text2">
+                            Measured vs planned:{' '}
+                            {over ? `+${c.doseDeltaPct}% above plan` : `${c.doseDeltaPct}% (within plan)`}
+                          </span>
+                        </div>
+
+                        <span className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          <Stat label="EVAs done" value={c.evasCompleted} />
+                          <Stat label="Heart rate" value={`${c.heartRate} bpm`} />
+                          <Stat label="SpO₂" value={`${c.vitals.spo2}%`} />
+                          <Stat label="Sleep" value={`${c.vitals.sleepH} h`} />
+                        </span>
+                        <span className="flex items-start gap-2 text-base text-mh-text2">
+                          <HeartPulse className="w-5 h-5 shrink-0 mt-0.5" aria-hidden="true" />
+                          <span>
+                            Fatigue {c.fatigue.toLowerCase()} · Psych: {c.psych}
+                          </span>
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </Card>
+
+              <Card
                 eyebrow="Optimizer"
                 title="Jezero route comparison"
                 icon={Compass}
-                subtitle="Thresholds are demo parameters. Select a route to show it on the map."
+                subtitle="Thresholds are demo parameters. Click a route to see its data and show it on the map."
+                collapsible
               >
                 <div className="flex flex-col gap-2" role="radiogroup" aria-label="EVA route">
-                  {Object.values(mission.routes).map((rt) => {
+                  {Object.values(mission.routes).map((rt, rtIdx) => {
                     const isSelected = mission.selectedRoute === rt.id;
                     const bufferOk = rt.bufferMin >= mission.timeWindow.returnBufferMin;
+                    const doseRate = sepAlertActive ? DOSE_RATE_SEP_UGY_H : DOSE_RATE_NOMINAL_UGY_H;
+                    const expectedDose = (rt.evaDurationMin / 60) * doseRate;
+                    const eta = addMinutesToLst(mission.timeWindow.suggestedStart, rt.evaDurationMin);
                     return (
                       <button
                         key={rt.id}
                         type="button"
                         role="radio"
                         aria-checked={isSelected}
+                        aria-expanded={isSelected}
                         onClick={() => setMission((prev) => ({ ...prev, selectedRoute: rt.id }))}
                         className={`w-full text-left p-4 rounded-mh-md border-2 cursor-pointer transition-colors flex flex-col gap-3 text-mh-text ${
                           isSelected ? 'bg-mh-fill-blue border-mh-primary' : 'bg-mh-fill border-transparent'
                         }`}
                       >
-                        <span className="flex items-start justify-between gap-3">
-                          <span className="flex items-start gap-2 min-w-0">
+                        <span className="flex items-center justify-between gap-3">
+                          <span className="flex items-center gap-3 min-w-0">
                             <span
-                              className="mt-1.5 w-3 h-3 rounded-full shrink-0"
+                              className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center font-mono text-[13px] font-medium text-white"
                               style={{ background: rt.color }}
                               aria-hidden="true"
+                            >
+                              {rtIdx + 1}
+                            </span>
+                            <span className="flex flex-col min-w-0">
+                              <span className="text-base font-semibold">
+                                Route {rtIdx + 1} · {rt.name.split('(')[0].replace(/^Route\s+/, '').trim()}
+                              </span>
+                              {!isSelected && (
+                                <span className="text-base text-mh-text2">
+                                  ETA {eta} LST · {formatDuration(rt.evaDurationMin)}
+                                </span>
+                              )}
+                            </span>
+                          </span>
+                          <span className="flex items-center gap-2 shrink-0">
+                            <span className={`mh-pill ${bufferOk ? 'mh-pill--ok' : 'mh-pill--crit'}`}>
+                              {bufferOk ? 'Buffer OK' : 'Over limit'}
+                            </span>
+                            <ChevronDown
+                              className={`w-5 h-5 text-mh-text2 transition-transform ${isSelected ? 'rotate-180' : ''}`}
+                              aria-hidden="true"
                             />
-                            <span className="text-base font-semibold">{rt.name}</span>
-                          </span>
-                          <span className={`mh-pill shrink-0 ${bufferOk ? 'mh-pill--ok' : 'mh-pill--crit'}`}>
-                            {bufferOk ? 'Buffer OK' : 'Over limit'} · {rt.bufferMin} min
                           </span>
                         </span>
-                        <span className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                          <Stat label="Distance" value={`${rt.distanceKm} km`} />
-                          <Stat label="Elevation gain" value={`+${rt.elevationGainM} m`} />
-                          <Stat label="Max slope" value={`${rt.slopeMax}°`} />
-                          <Stat label="Coverage" value={`${rt.dataCoveragePct}%`} />
-                        </span>
-                        <span className="text-base text-mh-text2">{rt.funnelYield}</span>
+
+                        {isSelected && (
+                          <>
+                            <span className="text-base text-mh-text2">{rt.name}</span>
+                            <span className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              <Stat tile label="ETA at HAB" value={`${eta} LST`} />
+                              <Stat tile label="Total mission time" value={formatDuration(rt.evaDurationMin)} />
+                              <Stat tile label="Expected dose" value={formatDose(expectedDose)} />
+                            </span>
+                            <span className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                              <Stat label="Distance" value={`${rt.distanceKm} km`} />
+                              <Stat label="Elevation gain" value={`+${rt.elevationGainM} m`} />
+                              <Stat label="Max slope" value={`${rt.slopeMax}°`} />
+                              <Stat label="Return buffer" value={`${rt.bufferMin} min`} />
+                            </span>
+                            <span className="text-base text-mh-text2">
+                              Start {mission.timeWindow.suggestedStart} LST · latest return{' '}
+                              {mission.timeWindow.latestReturn} LST · dose at{' '}
+                              {sepAlertActive ? `${DOSE_RATE_SEP_UGY_H} µGy/h (SEP, unshielded)` : `${DOSE_RATE_NOMINAL_UGY_H} µGy/h (nominal)`}{' '}
+                              · coverage {rt.dataCoveragePct}%
+                            </span>
+                            <span className="text-base text-mh-text2">{rt.funnelYield}</span>
+                          </>
+                        )}
                       </button>
                     );
                   })}
@@ -1984,10 +2526,14 @@ export default function MissionPlanner() {
               </Card>
 
               <Card
+                // Remounts when the SEP alert toggles so the card auto-opens on the alert
+                key={sepAlertActive ? 'env-sep' : 'env'}
                 eyebrow="Environment"
                 title="EVA window & MEDA weather"
                 icon={Radio}
                 aside={<span className="mh-pill mh-pill--warn">Historical data</span>}
+                collapsible
+                defaultOpen={sepAlertActive}
               >
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <Stat
@@ -2016,6 +2562,7 @@ export default function MissionPlanner() {
                 title="Plan versions"
                 icon={GitBranch}
                 aside={<span className="mh-pill mh-pill--info">Active: {mission.activePlanVersion}</span>}
+                collapsible
               >
                 <ol className="m-0 p-0 list-none flex flex-col gap-2">
                   {mission.planVersions.map((pv) => {
@@ -2289,7 +2836,32 @@ const PRIORITY_META = {
   LOW: { label: 'Low', cls: 'mh-pill--info' }
 };
 
-function Card({ eyebrow, title, subtitle, icon: Icon, aside, highlight = false, children }) {
+// `collapsible` turns the header into a show/hide toggle (accordion-style "menu a scomparsa")
+function Card({
+  eyebrow,
+  title,
+  subtitle,
+  icon: Icon,
+  aside,
+  highlight = false,
+  collapsible = false,
+  defaultOpen = true,
+  children
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const isOpen = !collapsible || open;
+
+  const heading = (
+    <div className="flex flex-col gap-1 min-w-0">
+      {eyebrow && <span className="mh-eyebrow">{eyebrow}</span>}
+      <h2 className="m-0 text-[22px] leading-tight font-bold flex items-start gap-2">
+        {Icon && <Icon className="w-6 h-6 mt-0.5 shrink-0 text-mh-primary dark:text-mh-link" aria-hidden="true" />}
+        <span>{title}</span>
+      </h2>
+      {subtitle && isOpen && <p className="m-0 text-base text-mh-text2">{subtitle}</p>}
+    </div>
+  );
+
   return (
     <section
       className={`bg-mh-card rounded-mh-lg shadow-mh p-5 sm:p-6 flex flex-col gap-4 ${
@@ -2297,17 +2869,26 @@ function Card({ eyebrow, title, subtitle, icon: Icon, aside, highlight = false, 
       }`}
     >
       <header className="flex items-start justify-between gap-3">
-        <div className="flex flex-col gap-1 min-w-0">
-          {eyebrow && <span className="mh-eyebrow">{eyebrow}</span>}
-          <h2 className="m-0 text-[22px] leading-tight font-bold flex items-start gap-2">
-            {Icon && <Icon className="w-6 h-6 mt-0.5 shrink-0 text-mh-primary dark:text-mh-link" aria-hidden="true" />}
-            <span>{title}</span>
-          </h2>
-          {subtitle && <p className="m-0 text-base text-mh-text2">{subtitle}</p>}
-        </div>
+        {collapsible ? (
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            aria-expanded={isOpen}
+            className="flex-1 min-w-0 flex items-start justify-between gap-3 text-left bg-transparent border-0 p-0 cursor-pointer text-mh-text"
+          >
+            {heading}
+            <ChevronDown
+              className={`w-6 h-6 mt-1 shrink-0 text-mh-text2 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+              aria-hidden="true"
+            />
+            <span className="sr-only">{isOpen ? 'Collapse section' : 'Expand section'}</span>
+          </button>
+        ) : (
+          heading
+        )}
         {aside && <div className="shrink-0">{aside}</div>}
       </header>
-      {children}
+      {isOpen && children}
     </section>
   );
 }
@@ -2321,17 +2902,223 @@ function Stat({ label, value, tile = false }) {
   );
 }
 
-function FilterToggle({ on, onClick, children }) {
+function FilterToggle({ on, onClick, hint, children }) {
   return (
     <button
       type="button"
       aria-pressed={on}
       onClick={onClick}
+      title={hint}
       className={`mh-btn !px-4 ${on ? 'mh-btn--tinted' : 'bg-mh-fill text-mh-text2'}`}
     >
       {on ? <CheckCircle2 className="w-5 h-5" aria-hidden="true" /> : <span className="w-5 h-5 rounded-full border-2 border-current" aria-hidden="true" />}
       <span>{children}</span>
       <span className="sr-only">{on ? '(on)' : '(off)'}</span>
     </button>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAP LEGEND (collapsible overlay). Mirrors exactly what the map effect draws for
+// the current role + filters, so every line, area and flag on the map is explained.
+// ═══════════════════════════════════════════════════════════════════════════════
+function LineSwatch({ color, dash = null, width = 3 }) {
+  return (
+    <svg width="28" height="12" viewBox="0 0 28 12" aria-hidden="true" className="shrink-0">
+      <line x1="1" y1="6" x2="27" y2="6" stroke={color} strokeWidth={width} strokeDasharray={dash ?? undefined} strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function AreaSwatch({ stroke, fill, dash = null, round = false }) {
+  return (
+    <svg width="28" height="16" viewBox="0 0 28 16" aria-hidden="true" className="shrink-0">
+      {round ? (
+        <circle cx="14" cy="8" r="6.5" stroke={stroke} strokeWidth="2" fill={fill} fillOpacity="0.4" />
+      ) : (
+        <rect x="2" y="2" width="24" height="12" rx="2" stroke={stroke} strokeWidth="2" strokeDasharray={dash ?? undefined} fill={fill} fillOpacity="0.35" />
+      )}
+    </svg>
+  );
+}
+
+function LegendRow({ swatch, children }) {
+  return (
+    <li className="flex items-center gap-2">
+      <span className="w-7 flex justify-center shrink-0">{swatch}</span>
+      <span className="min-w-0">{children}</span>
+    </li>
+  );
+}
+
+function LegendSection({ title, children }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="font-mono text-[11px] uppercase tracking-[0.1em] text-mh-text2">{title}</span>
+      <ul className="m-0 p-0 list-none flex flex-col gap-1.5">{children}</ul>
+    </div>
+  );
+}
+
+function MapLegend({ currentRole, activeFilters, routes, selectedRoute, fusionPct }) {
+  const [open, setOpen] = useState(() =>
+    typeof window === 'undefined' ? true : window.innerWidth >= 640
+  );
+  const notHud = currentRole !== 'astronaut';
+  const showFusion = activeFilters.filter1_spectralFusion && notHud;
+  const showThermal = activeFilters.filter2_thermalInertia && notHud;
+  const showHazards = activeFilters.topographySlope || currentRole === 'control';
+  const showTraverse = activeFilters.filter3_pdsTargetsTraverse && notHud;
+  const showRoutes = activeFilters.candidateRoutes;
+
+  return (
+    <div className="absolute top-3 left-3 z-20 w-[260px] max-w-[calc(100%-5rem)] max-h-[calc(100%-1.5rem)] flex flex-col bg-mh-card text-mh-text rounded-mh-md shadow-mh overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex items-center justify-between gap-2 min-h-11 px-3 bg-transparent border-0 cursor-pointer text-mh-text font-semibold text-[15px]"
+      >
+        <span className="flex items-center gap-2">
+          <Layers className="w-4 h-4" aria-hidden="true" />
+          Legend
+        </span>
+        <ChevronDown
+          className={`w-5 h-5 text-mh-text2 transition-transform ${open ? 'rotate-180' : ''}`}
+          aria-hidden="true"
+        />
+      </button>
+
+      {open && (
+        <div className="px-3 pb-3 flex flex-col gap-3 overflow-y-auto text-[13px] leading-snug">
+          <LegendSection title="Targets (POI flags)">
+            {[
+              ['HIGH', 'High priority'],
+              ['MED', 'Medium priority'],
+              ['LOW', 'Low priority']
+            ].map(([k, label]) => (
+              <LegendRow
+                key={k}
+                swatch={<span dangerouslySetInnerHTML={{ __html: flagSvg(POI_FLAG_COLORS[k], '', 0.55) }} />}
+              >
+                {label}
+              </LegendRow>
+            ))}
+            <li className="text-mh-text2">Number = visit order · click a flag for geology</li>
+          </LegendSection>
+
+          {showRoutes && routes.length > 0 && (
+            <LegendSection title="EVA routes">
+              {routes.map((rt) => (
+                <LegendRow
+                  key={rt.id}
+                  swatch={
+                    <LineSwatch
+                      color={rt.color}
+                      dash={rt.dashArray ? rt.dashArray.replace(',', ' ') : null}
+                      width={rt.id === selectedRoute ? 4.5 : 2.5}
+                    />
+                  }
+                >
+                  {rt.name.split('(')[0].trim()}
+                  {rt.id === selectedRoute ? ' (selected)' : ''}
+                </LegendRow>
+              ))}
+              <li className="text-mh-text2">Thick line = selected route</li>
+            </LegendSection>
+          )}
+
+          {showFusion && (
+            <LegendSection title="CRISM prior ↔ PDS posterior">
+              <LegendRow swatch={<AreaSwatch stroke="#E5C04A" fill="#a855f7" dash="4 3" />}>
+                Orbital mineral zone (CRISM prior, σ ±32–36%)
+              </LegendRow>
+              <LegendRow swatch={<AreaSwatch stroke="#35B17A" fill="#35B17A" round />}>
+                In-situ measurement (PDS posterior)
+              </LegendRow>
+              <LegendRow swatch={<LineSwatch color="#38bdf8" width={7} />}>
+                Hydrated vein corridor
+              </LegendRow>
+              <li className="text-mh-text2">
+                Fusion weight {fusionPct}% posterior — grows as each demo Sol adds in-situ data.
+              </li>
+            </LegendSection>
+          )}
+
+          {showThermal && (
+            <LegendSection title="THEMIS night thermal">
+              <li className="flex flex-col gap-1">
+                <span
+                  className="h-2.5 rounded-full"
+                  aria-hidden="true"
+                  style={{ background: `linear-gradient(90deg, ${THERMAL_RDBU_STOPS.join(', ')})` }}
+                />
+                <span className="flex justify-between gap-2 text-mh-text2">
+                  <span>Cold · sand/dust</span>
+                  <span>Warm · bedrock</span>
+                </span>
+              </li>
+            </LegendSection>
+          )}
+
+          {showHazards && (
+            <LegendSection title="Slope & not-evaluated">
+              <LegendRow swatch={<LineSwatch color="#E5484D" width={5} />}>Slope &gt; 15° (demo threshold)</LegendRow>
+              <LegendRow swatch={<AreaSwatch stroke="#E5C04A" fill="#E5C04A" dash="5 3" />}>
+                Not evaluated — no safety claim
+              </LegendRow>
+            </LegendSection>
+          )}
+
+          {showTraverse && (
+            <LegendSection title="Perseverance traverse">
+              <LegendRow swatch={<LineSwatch color="#FF6B35" dash="3 3" width={2.5} />}>
+                Rover path (MMGIS / PDS)
+              </LegendRow>
+              <LegendRow
+                swatch={
+                  <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+                    <circle cx="6" cy="6" r="4" fill="#0b0f14" stroke="#ffd166" strokeWidth="1.5" />
+                  </svg>
+                }
+              >
+                Rover waypoint (hover for Sol)
+              </LegendRow>
+            </LegendSection>
+          )}
+
+          <LegendSection title="Field events & markers">
+            {[
+              ['#38bdf8', 'Formation of interest'],
+              ['#E5484D', 'Boulder hazard'],
+              ['#E5C04A', 'Soft soil']
+            ].map(([c, label]) => (
+              <LegendRow
+                key={label}
+                swatch={<span className="font-mono text-[15px] leading-none" style={{ color: c }}>◆</span>}
+              >
+                {label}
+              </LegendRow>
+            ))}
+            {showRoutes && (
+              <LegendRow
+                swatch={<span className="w-6 h-3 rounded-full bg-mh-primary" aria-hidden="true" />}
+              >
+                HAB base / shelter
+              </LegendRow>
+            )}
+            <LegendRow
+              swatch={
+                <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+                  <circle cx="7" cy="7" r="5" fill="#FC3D21" stroke="#ffffff" strokeWidth="2" />
+                </svg>
+              }
+            >
+              Inspected point (map click)
+            </LegendRow>
+          </LegendSection>
+        </div>
+      )}
+    </div>
   );
 }
