@@ -1214,8 +1214,7 @@ export default function MissionPlanner() {
       const sub = poi.priority ? `${PRIORITY_META[poi.priority].label} priority` : 'No priority yet';
       const isSelected = selectedPoiId === poi.id;
       const html = `
-        <div style="display:flex;align-items:center;gap:8px;background:var(--mh-card);border:2px solid ${
-          isSelected ? 'var(--mh-primary)' : color
+        <div style="display:flex;align-items:center;gap:8px;background:var(--mh-card);border:2px solid ${isSelected ? 'var(--mh-primary)' : color
         };padding:4px 12px 4px 4px;border-radius:999px;box-shadow:0 3px 12px rgba(0,0,0,0.35);white-space:nowrap;">
           <span style="width:26px;height:26px;border-radius:50%;background:${color};color:var(--mh-card);font-family:var(--mh-font-mono);font-weight:500;font-size:13px;display:flex;align-items:center;justify-content:center;">${order ?? '•'}</span>
           <div>
@@ -1389,9 +1388,8 @@ export default function MissionPlanner() {
         {/* LEFT: PERSISTENT LEAFLET MAP CARD */}
         <section
           ref={mapSectionRef}
-          className={`flex flex-col bg-mh-card rounded-mh-lg shadow-mh overflow-hidden scroll-mt-6 ${
-            mapExpanded ? 'lg:col-span-2' : 'lg:sticky lg:top-6'
-          }`}
+          className={`flex flex-col bg-mh-card rounded-mh-lg shadow-mh overflow-hidden scroll-mt-6 ${mapExpanded ? 'lg:col-span-2' : 'lg:sticky lg:top-6'
+            }`}
           aria-label="Jezero map"
         >
           {/* Map header: role filter toggles */}
@@ -1433,11 +1431,10 @@ export default function MissionPlanner() {
 
           {/* Map */}
           <div
-            className={`relative ${pickMode ? 'pick-mode' : ''} ${
-              mapExpanded
+            className={`relative ${pickMode ? 'pick-mode' : ''} ${mapExpanded
                 ? 'h-[calc(100vh-10rem)] min-h-[420px]'
                 : 'h-[420px] sm:h-[520px] lg:h-[calc(100vh-30rem)] lg:min-h-[360px] lg:max-h-[720px]'
-            }`}
+              }`}
           >
             <div ref={mapContainerRef} className="w-full h-full z-10" />
             {pickMode && (
