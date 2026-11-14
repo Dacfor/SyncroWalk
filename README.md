@@ -119,22 +119,30 @@ flowchart TD
 
 ```text
 SyncroWalk/
+├── public/
+│   ├── favicon.svg               # Web application favicon
+│   └── icons.svg                 # SVG sprite and mission icon definitions
+├── src/
+│   ├── components/
+│   │   └── MissionPlanner.tsx    # Core Mission Planning canvas, Leaflet GIS, Bayesian update & HUD
+│   ├── App.tsx                   # Main React component entry point
+│   ├── index.css                 # Global styling & Tailwind CSS directives
+│   └── main.tsx                  # React DOM rendering bootstrap
+├── .gitignore                    # Git ignore file (node_modules, .venv, etc.)
+├── CONTRIBUTING.md               # Open-source contributing guidelines & PR workflow
+├── index.html                    # HTML shell (Inter + IBM Plex Mono fonts)
+├── package.json                  # Frontend dependencies (React 19, Lucide, Tailwind v4, Vite)
+├── package-lock.json             # NPM lockfile
+├── proxy.py                      # FastAPI CORS & HTTP Range caching proxy for NASA PDS/USGS rasters
 ├── README.md                     # Official documentation, setup guide & architecture roadmap
-├── backend/
-│   ├── proxy.py                  # Asynchronous FastAPI CORS & HTTP Range caching proxy
-│   └── requirements.txt          # Python dependencies (fastapi, uvicorn, httpx)
-├── frontend/
-│   ├── package.json              # Frontend dependencies & Vite scripts
-│   ├── vite.config.js            # Vite bundler & dev server config (port 5173)
-│   ├── tailwind.config.js        # Mission Control design tokens (#0b0f14, #2D7FF9, #FF6B35)
-│   ├── postcss.config.js         # PostCSS configuration
-│   ├── index.html                # App shell (Inter + IBM Plex Mono fonts)
-│   └── src/
-│       ├── main.jsx              # React DOM entry point
-│       ├── index.css             # Tailwind CSS directives & base dark-mode typography
-│       └── App.jsx               # Main React application (Persistent Map + 3 Role Lenses + PDS)
-└── prototype-vanilla/
-    └── index.html                # Standalone HTML/ESM prototype for direct WMTS/COG verification
+├── requirements.txt              # Python dependencies (fastapi, uvicorn, httpx, cachetools)
+├── setup_env.bat                 # Automated virtual environment setup script for Windows CMD
+├── setup_env.ps1                 # Automated virtual environment setup script for PowerShell
+├── setup_env.sh                  # Automated virtual environment setup script for macOS / Linux
+├── tsconfig.app.json             # TypeScript configuration for the React application
+├── tsconfig.json                 # TypeScript root project reference
+├── tsconfig.node.json            # TypeScript configuration for Node/Vite build tooling
+└── vite.config.ts                # Vite bundler & dev server configuration
 ```
 
 ---
@@ -143,8 +151,10 @@ SyncroWalk/
 
 ### Prerequisites
 
-* **Node.js** ($\ge 18.0.0$) and **npm** (for the React + Vite frontend)
-* **Python** ($\ge 3.10$) (optional but recommended for the FastAPI CORS & `HTTP Range` proxy)
+* **Node.js** ($\ge 18.0.0$) and **npm** (core requirement)
+* **Python** ($\ge 3.10$) (optional, for the local caching proxy)
+
+---
 
 ### 1. Clone the Repository
 
@@ -153,14 +163,82 @@ git clone https://github.com/Dacfor/SyncroWalk.git
 cd SyncroWalk
 ```
 
-### 2. Backend Setup (Python Virtual Environment & FastAPI Proxy)
+---
 
-While NASA Mars Trek WMTS tiles and USGS S3 GeoTIFFs support open CORS directly in the browser, running the local FastAPI proxy (`backend/proxy.py`) enables in-memory caching ($1\text{-hour}$ TTL) and seamless forwarding of `Range` headers for PDS/MMGIS endpoints.
+### ⚡ Quick Start: Frontend Only (30 Seconds — Recommended for Evaluation)
 
-#### On macOS / Linux:
+The web application runs **100% in modern browsers** by connecting directly to NASA Trek WMTS & USGS servers via open CORS. No Python setup is required to evaluate the full mission planning interface:
 
 ```bash
-cd backend
+# Install dependencies
+npm install
+
+# Start Vite dev server
+npm run dev
+```
+
+> **Verification:** Vite will start the application at **`http://localhost:5173`**.
+
+#### Production Build (Optional)
+```bash
+npm run build
+npm run preview
+```
+
+---
+
+### 🔬 Advanced Setup: Local FastAPI Proxy (Optional Caching & Range Optimization)
+
+While Mars Trek WMTS tiles support open CORS directly in the browser, running the included local FastAPI proxy (`proxy.py`) provides in-memory caching ($1\text{-hour}$ TTL) and optimized byte-range forwarding for large USGS MOLA elevation GeoTIFFs.
+
+#### Quick Automated Setup:
+
+* **Windows (PowerShell):**
+  ```powershell
+  .\setup_env.ps1
+  ```
+* **macOS / Linux:**
+  ```bash
+  chmod +x setup_env.sh
+  ./setup_env.sh
+  ```
+
+#### Manual Setup:
+
+##### Windows (PowerShell):
+```powershell
+# 1. Create the virtual environment
+python -m venv .venv
+
+# 2. Activate the virtual environment
+# Note: If PowerShell displays a script execution error, run once:
+# Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+.\.venv\Scripts\Activate.ps1
+
+# 3. Upgrade pip and install requirements
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+
+# 4. Start the FastAPI proxy server
+uvicorn proxy:app --host 127.0.0.1 --port 8000 --reload
+```
+
+> **💡 Windows Tip (Zero Policy Modification):** You can also run the proxy directly without activating the virtual environment:
+> ```powershell
+> .\.venv\Scripts\python.exe -m uvicorn proxy:app --host 127.0.0.1 --port 8000 --reload
+> ```
+
+##### Windows (Command Prompt / `cmd.exe`):
+```cmd
+python -m venv .venv
+call .venv\Scripts\activate.bat
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+uvicorn proxy:app --host 127.0.0.1 --port 8000 --reload
+```
+
+##### macOS / Linux:
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
@@ -168,51 +246,10 @@ pip install -r requirements.txt
 uvicorn proxy:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-#### On Windows (PowerShell):
-
-```powershell
-cd backend
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install --upgrade pip
-pip install -r requirements.txt
-uvicorn proxy:app --host 127.0.0.1 --port 8000 --reload
-```
-
-#### On Windows (Command Prompt / `cmd.exe`):
-
-```cmd
-cd backend
-python -m venv .venv
-.venv\Scripts\activate.bat
-pip install --upgrade pip
-pip install -r requirements.txt
-uvicorn proxy:app --host 127.0.0.1 --port 8000 --reload
-```
-
-> **Verification:** Once running, the proxy listens at `http://localhost:8000/proxy?url=`. Interactive Swagger API documentation is available at `http://localhost:8000/docs`. Inside the web app top bar, click **`Direct CORS (Trek/USGS)`** to toggle **`Proxy :8000 ON`**.
-
-### 3. Frontend Setup (React + Vite + Tailwind CSS)
-
-Open a **second terminal window** from the project root:
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-> **Verification:** Vite will start the development server and automatically open **`http://localhost:5173`** in your browser.
-
-### 4. Production Build (Optional)
-
-To compile and preview the optimized production bundle:
-
-```bash
-cd frontend
-npm run build
-npm run preview
-```
+> **Verification:** 
+> * Once running, the proxy listens at `http://localhost:8000/proxy?url=`.
+> * Interactive Swagger API documentation is available at `http://localhost:8000/docs`.
+> * In the SyncroWalk web app top bar, click **`Direct CORS (Trek/USGS)`** to toggle **`Proxy :8000 ON`**.
 
 ---
 
@@ -256,7 +293,7 @@ Use the **`DEMO: [Sol 1: Prior] [Sol 2: 12m Funnel] [Sol 3: SEP Alert]`** steppe
 
 ## 🛠️ Technical Roadmap & Next Improvements
 
-1. **FastAPI Lifespan & Bounded LRU Cache (`backend/proxy.py`)**:
+1. **FastAPI Lifespan & Bounded LRU Cache (`proxy.py`)**:
    * Manage `httpx.AsyncClient` via FastAPI's `@asynccontextmanager` lifespan handler and replace the unbounded in-memory dictionary with a bounded `TTLCache` (e.g., max $128$ entries) to prevent memory growth during extended sessions.
 2. **Bundled NPM GIS Dependencies (`leaflet` & `geotiff`)**:
    * Bundle `leaflet` and `geotiff` directly via Vite (`npm install leaflet geotiff`) rather than dynamic CDN injection to guarantee $100\%$ offline stage reliability.
@@ -264,3 +301,28 @@ Use the **`DEMO: [Sol 1: Prior] [Sol 2: 12m Funnel] [Sol 3: SEP Alert]`** steppe
    * Synchronize `mission.json` state across browser windows so judges can view **Mission Control** on one screen and the **Astronaut HUD** on a second screen updating simultaneously in real time.
 4. **Single-Command Orchestration (`docker-compose.yml`)**:
    * Provide a root `docker-compose.yml` and `Makefile` (`make dev`) to spin up both the FastAPI proxy (`:8000`) and Vite frontend (`:5173`) in a single command.
+
+---
+
+## 🤝 Contributing & Community Guidelines
+
+Contributions from GIS developers, planetary geologists, frontend engineers, and space enthusiasts are warmly welcomed!
+
+Please review our [**CONTRIBUTING.md**](CONTRIBUTING.md) guide before submitting a pull request. It includes:
+* **Branch Strategy:** `main` (stable releases), `dev_*` (personal work branches), and `feature/*` (scoped enhancements).
+* **Code Standards:** TypeScript strict typechecking, Oxlint linting, and Tailwind CSS design tokens.
+* **Commit Conventions:** Standard [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`).
+* **PR Checklist:** Verification steps and PR description templates.
+
+
+---
+
+## 🤝 Contributing & Community Guidelines
+
+Contributions from GIS developers, planetary geologists, frontend engineers, and space enthusiasts are warmly welcomed!
+
+Please review our [**CONTRIBUTING.md**](CONTRIBUTING.md) guide before submitting a pull request. It includes:
+* **Branch Strategy:** `main` (stable releases), `dev_*` (personal work branches), and `feature/*` (scoped enhancements).
+* **Code Standards:** TypeScript strict typechecking, Oxlint linting, and Tailwind CSS design tokens.
+* **Commit Conventions:** Standard [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`).
+* **PR Checklist:** Verification steps and PR description templates.
