@@ -1,9 +1,110 @@
 @import 'tailwindcss';
+/* Mission Hub (esempio/mission-hub.css): tokens + mh-* components.
+   Loaded into the "components" layer so Tailwind utilities can still override it. */
+@import './styles/mission-hub.css' layer(components);
+
+/* dark: same logic as Mission Hub (forced data-theme, otherwise the device setting) */
+@custom-variant dark {
+  &:where([data-theme='dark'], [data-theme='dark'] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme='light']), :root:not([data-theme='light']) *) {
+      @slot;
+    }
+  }
+}
+
+/* Exposes Mission Hub tokens as Tailwind utilities:
+   bg-mh-card, text-mh-text2, border-mh-sep, rounded-mh-lg, shadow-mh, font-mono… */
+@theme inline {
+  --font-sans: var(--mh-font);
+  --font-mono: var(--mh-font-mono);
+
+  --color-mh-bg: var(--mh-bg);
+  --color-mh-card: var(--mh-card);
+  --color-mh-fill: var(--mh-fill);
+  --color-mh-fill-blue: var(--mh-fill-blue);
+  --color-mh-sep: var(--mh-sep);
+  --color-mh-track: var(--mh-track);
+  --color-mh-text: var(--mh-text);
+  --color-mh-text2: var(--mh-text2);
+  --color-mh-nav: var(--mh-nav);
+  --color-mh-nav-fill: var(--mh-nav-fill);
+  --color-mh-nav-text: var(--mh-nav-text);
+  --color-mh-nav-text2: var(--mh-nav-text2);
+  --color-mh-hero: var(--mh-hero);
+  --color-mh-hero-text2: var(--mh-hero-text2);
+  --color-mh-hero-label: var(--mh-hero-label);
+  --color-mh-primary: var(--mh-primary);
+  --color-mh-on-primary: var(--mh-on-primary);
+  --color-mh-primary-soft: var(--mh-primary-soft);
+  --color-mh-link: var(--mh-link);
+  --color-mh-focus: var(--mh-focus);
+  --color-mh-accent: var(--mh-accent);
+  --color-mh-accent-text: var(--mh-accent-text);
+  --color-mh-ok: var(--mh-ok);
+  --color-mh-ok-bg: var(--mh-ok-bg);
+  --color-mh-warn: var(--mh-warn);
+  --color-mh-warn-bg: var(--mh-warn-bg);
+  --color-mh-crit: var(--mh-crit);
+  --color-mh-crit-bg: var(--mh-crit-bg);
+  --color-mh-info: var(--mh-info);
+  --color-mh-info-bg: var(--mh-info-bg);
+  --color-mh-alert-bg: var(--mh-alert-bg);
+  --color-mh-alert-text: var(--mh-alert-text);
+
+  --radius-mh-xs: var(--mh-radius-xs);
+  --radius-mh-sm: var(--mh-radius-sm);
+  --radius-mh-md: var(--mh-radius-md);
+  --radius-mh-lg: var(--mh-radius-lg);
+  --radius-mh-xl: var(--mh-radius-xl);
+
+  --shadow-mh: var(--mh-shadow);
+  --shadow-mh-btn: var(--mh-btn-shadow);
+}
 
 html,
 body,
 #root {
   margin: 0;
   min-height: 100%;
-  background: #0b0f14;
+  background: var(--mh-bg);
+}
+
+/* Leaflet themed with the tokens (light/dark) */
+.leaflet-container {
+  background: var(--mh-bg) !important;
+  font-family: var(--mh-font-mono);
+}
+.leaflet-control-scale-line,
+.leaflet-control-attribution {
+  background: color-mix(in srgb, var(--mh-card) 85%, transparent) !important;
+  color: var(--mh-text2) !important;
+}
+.leaflet-control-attribution a {
+  color: var(--mh-link) !important;
+}
+.leaflet-tooltip {
+  background: var(--mh-card);
+  color: var(--mh-text);
+  border: none;
+  border-radius: var(--mh-radius-xs);
+  box-shadow: var(--mh-shadow), 0 4px 14px rgba(0, 0, 0, 0.18);
+  font-family: var(--mh-font-mono);
+}
+.syncrowalk-tooltip {
+  background: var(--mh-card) !important;
+  color: var(--mh-text) !important;
+  border: 2px solid var(--mh-accent) !important;
+  border-radius: var(--mh-radius-pill) !important;
+  padding: 4px 10px !important;
+  font-family: var(--mh-font-mono) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+}
+
+/* Range sliders tinted with the theme */
+input[type='range'] {
+  accent-color: var(--mh-primary);
 }
