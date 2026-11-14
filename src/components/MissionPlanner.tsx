@@ -29,12 +29,14 @@ import {
   ZoomOut,
   PlusCircle,
   Zap,
-  UserCheck,
   Server,
   Activity,
   MapPin,
   Filter,
-  FastForward
+  FastForward,
+  Sun,
+  Moon,
+  SunMoon
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -634,6 +636,25 @@ export default function MissionPlanner() {
   const [showJsonModal, setShowJsonModal] = useState(false);
   const [toastMsg, setToastMsg] = useState(null);
 
+  // Mission Hub theme: 'auto' follows the device, 'light' / 'dark' force it
+  const [themePref, setThemePref] = useState(() => {
+    try {
+      return localStorage.getItem('syncrowalk-theme') || 'auto';
+    } catch {
+      return 'auto';
+    }
+  });
+  useEffect(() => {
+    const root = document.documentElement;
+    if (themePref === 'auto') delete root.dataset.theme;
+    else root.dataset.theme = themePref;
+    try {
+      localStorage.setItem('syncrowalk-theme', themePref);
+    } catch {
+      /* storage unavailable */
+    }
+  }, [themePref]);
+
   // Refs for persistent Leaflet instance (NEVER unmounts on role switch)
   const mapContainerRef = useRef(null);
   const mapInstanceRef = useRef(null);
@@ -812,12 +833,12 @@ export default function MissionPlanner() {
             radius: 7,
             color: '#ffffff',
             weight: 2.5,
-            fillColor: '#FF6B35',
-            fillOpacity: 0.85
+            fillColor: '#FC3D21',
+            fillOpacity: 0.9
           })
             .bindTooltip(
               `MOLA: ${molaZ} m · Sol ${nearest?.sol ?? '?'} (${nearest?.km.toFixed(2)} km)`,
-              { permanent: true, direction: 'top', className: 'marswalk-tooltip' }
+              { permanent: true, direction: 'top', className: 'syncrowalk-tooltip' }
             )
             .addTo(vectorGroupsRef.current.clickPin);
         }
@@ -1120,7 +1141,7 @@ export default function MissionPlanner() {
       // Three Forks HAB Base Marker & Delta Basal Alcove Shelter Marker
       const habIcon = L.divIcon({
         className: '',
-        html: `<div style="background:#12181f;color:#fff;border:2px solid #2D7FF9;padding:2px 6px;border-radius:4px;font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.7);">HAB · Three Forks</div>`,
+        html: `<div style="background:var(--mh-primary);color:var(--mh-on-primary);padding:3px 10px;border-radius:999px;font-family:var(--mh-font-mono);font-size:12px;font-weight:500;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.35);">HAB · Three Forks</div>`,
         iconSize: [110, 22],
         iconAnchor: [55, 11]
       });
@@ -1128,7 +1149,7 @@ export default function MissionPlanner() {
 
       const shelterIcon = L.divIcon({
         className: '',
-        html: `<div style="background:#0b0f14;color:#35B17A;border:1.5px solid #35B17A;padding:2px 6px;border-radius:4px;font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;white-space:nowrap;">▲ ALCOVE SHELTER</div>`,
+        html: `<div style="background:var(--mh-ok-bg);color:var(--mh-ok);padding:3px 10px;border-radius:999px;font-family:var(--mh-font-mono);font-size:12px;font-weight:500;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.35);">▲ ALCOVE SHELTER</div>`,
         iconSize: [115, 22],
         iconAnchor: [57, 11]
       });
@@ -1147,9 +1168,9 @@ export default function MissionPlanner() {
           : '#38bdf8';
 
       const feHtml = `
-        <div style="display:flex;align-items:center;gap:4px;background:#0b0f14;color:${color};border:2px solid ${color};padding:2px 6px;border-radius:999px;font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;white-space:nowrap;box-shadow:0 2px 10px rgba(0,0,0,0.85);">
+        <div style="display:flex;align-items:center;gap:6px;background:var(--mh-card);color:${color};border:2px solid ${color};padding:2px 10px;border-radius:999px;font-family:var(--mh-font-mono);font-size:12px;font-weight:500;white-space:nowrap;box-shadow:0 2px 10px rgba(0,0,0,0.35);">
           <span>◆ ${fe.id}</span>
-          <span style="color:#fff;">[${fe.class}]</span>
+          <span style="color:var(--mh-text);">[${fe.class}]</span>
           <span>${Math.round(fe.confidence * 100)}%</span>
         </div>
       `;
@@ -1173,25 +1194,25 @@ export default function MissionPlanner() {
     sortedPois.forEach((poi) => {
       const bg =
         poi.priority === 'HIGH' || poi.order === 1
-          ? '#E5484D'
+          ? 'var(--mh-accent)'
           : poi.priority === 'MED' || poi.order === 2
-          ? '#E5C04A'
-          : '#64748b';
-      const fg = bg === '#E5C04A' ? '#0b0f14' : '#ffffff';
+          ? 'var(--mh-warn)'
+          : 'var(--mh-text2)';
+      const fg = 'var(--mh-card)';
       const isSelected = selectedPoiId === poi.id;
 
       const poiHtml = `
-        <div style="display:flex;align-items:center;gap:6px;background:#12181f;border:2px solid ${
-          isSelected ? '#2D7FF9' : bg
-        };padding:3px 8px 3px 4px;border-radius:6px;box-shadow:0 3px 12px rgba(0,0,0,0.85);white-space:nowrap;">
-          <span style="width:22px;height:22px;border-radius:4px;background:${bg};color:${fg};font-family:'IBM Plex Mono',monospace;font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center;">
+        <div style="display:flex;align-items:center;gap:8px;background:var(--mh-card);border:2px solid ${
+          isSelected ? 'var(--mh-primary)' : bg
+        };padding:4px 12px 4px 4px;border-radius:999px;box-shadow:0 3px 12px rgba(0,0,0,0.35);white-space:nowrap;">
+          <span style="width:24px;height:24px;border-radius:50%;background:${bg};color:${fg};font-family:var(--mh-font-mono);font-weight:500;font-size:12px;display:flex;align-items:center;justify-content:center;">
             ${poi.order}
           </span>
           <div>
-            <div style="color:#fff;font-family:'Inter',sans-serif;font-weight:700;font-size:11px;line-height:1.1;">
+            <div style="color:var(--mh-text);font-family:var(--mh-font);font-weight:700;font-size:12px;line-height:1.2;">
               ${poi.id}: ${poi.name.split('(')[0].trim()}
             </div>
-            <div style="color:#35B17A;font-family:'IBM Plex Mono',monospace;font-size:9.5px;">
+            <div style="color:var(--mh-ok);font-family:var(--mh-font-mono);font-size:11px;">
               PDS: ${poi.pdsInSituPosterior.hydrationPosterior} (${poi.pdsInSituPosterior.uncertaintyAfter})
             </div>
           </div>
@@ -1419,935 +1440,730 @@ export default function MissionPlanner() {
   );
 
   return (
-    <div
-      className="min-h-screen w-full bg-[#0b0f14] text-slate-100 flex flex-col select-none overflow-x-hidden"
-      style={{ fontFamily: "'Inter', system-ui, -apple-system, sans-serif" }}
-    >
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
-        .font-mono { font-family: 'IBM Plex Mono', monospace; }
-        .leaflet-container { background: #080b0f !important; font-family: 'IBM Plex Mono', monospace; }
-        .marswalk-tooltip {
-          background: #0b0f14 !important;
-          color: #ffffff !important;
-          border: 1px solid #FF6B35 !important;
-          font-family: 'IBM Plex Mono', monospace !important;
-          font-size: 11px !important;
-          font-weight: 700 !important;
-        }
-      `}</style>
-
+    <div className="min-h-screen w-full bg-mh-bg text-mh-text flex flex-col select-none overflow-x-hidden">
       {/* ═══════════════════════════════════════════════════════════════════════
-          §1 GLOBAL TOP BAR: JEZERO CONTEXT + SIMULATED AUTH SWITCHER + 3 FILTERS
+          §1 GLOBAL TOP BAR (Mission Hub navbar): BRAND + AUTH SWITCHER + DEMO + THEME
          ═══════════════════════════════════════════════════════════════════════ */}
-      <header className="bg-[#12181f] border-b border-[#1f2a35] px-3 py-2 flex flex-wrap items-center justify-between gap-2 z-30">
-        {/* Left: Brand, Jezero Coordinates, PDS Badge & Proxy Toggle */}
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <div className="w-8 h-8 rounded bg-[#FF6B35]/20 border border-[#FF6B35] flex items-center justify-center font-mono font-extrabold text-xs text-[#FF6B35]">
-            MW
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-extrabold tracking-tight text-sm sm:text-base text-white">
-                MARSWALK · Sol {23 + mission.demoScriptSol} · Jezero Crater
-              </span>
-              <span className="px-1.5 py-0.5 rounded bg-[#35B17A]/20 text-[#35B17A] border border-[#35B17A]/40 font-mono text-[10px] font-bold">
-                PDS Analyst’s Notebook: Séítah &amp; Delta
+      <header className="mh-navbar z-30">
+        <div className="px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+          {/* Left: Brand */}
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-mh-accent flex items-center justify-center font-mono font-medium text-sm text-white">
+              SW
+            </div>
+            <div className="flex flex-col">
+              <strong className="text-lg tracking-[0.02em] leading-tight">SYNCROWALK</strong>
+              <span className="font-mono text-[13px] text-mh-nav-text2">
+                EVA Mission Planner · Jezero Crater
               </span>
             </div>
-            <div className="text-[10px] font-mono text-slate-400 flex items-center gap-2">
-              <span>L.CRS.EPSG4326 (18.436°N, 77.456°E)</span>
-              <span>·</span>
+          </div>
+
+          {/* Center: SIMULATED AUTHENTICATED USER SWITCHER (Starts on Scientist) */}
+          <nav className="flex flex-wrap items-center gap-1" aria-label="Role">
+            {[
+              { id: 'scientist', label: 'Scientist', Icon: Sparkles },
+              { id: 'control', label: 'Mission Control', Icon: Compass },
+              { id: 'astronaut', label: 'Astronaut HUD', Icon: Navigation }
+            ].map(({ id, label, Icon }) => (
               <button
+                key={id}
+                type="button"
+                onClick={() => handleRoleSwitch(id)}
+                aria-current={currentRole === id ? 'page' : undefined}
+                className="mh-nav-link gap-2 cursor-pointer border-0 bg-transparent"
+              >
+                <Icon className="w-4 h-4" />
+                <span>{label}</span>
+                {id === 'control' && (
+                  <span className="px-2 rounded-full bg-mh-ok-bg text-mh-ok font-mono text-[13px]">
+                    {mission.activePlanVersion}
+                  </span>
+                )}
+              </button>
+            ))}
+          </nav>
+
+          {/* Right: EVIDENCE + mission.json + Day/Night/Auto */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowEvidenceDrawer(true)}
+              className="mh-btn bg-mh-nav-fill text-mh-nav-text"
+            >
+              <Database className="w-4 h-4" />
+              <span>Evidence</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowJsonModal(true)}
+              className="mh-btn mh-btn--icon bg-mh-nav-fill text-mh-nav-text"
+              title="Inspect shared mission.json v5 contract"
+              aria-label="Inspect mission.json"
+            >
+              <FileJson className="w-4 h-4" />
+            </button>
+            {(() => {
+              // Single round toggle: Auto → Light → Dark → Auto
+              const THEMES = {
+                auto: { next: 'light', label: 'Auto (follows device)', Icon: SunMoon },
+                light: { next: 'dark', label: 'Light', Icon: Sun },
+                dark: { next: 'auto', label: 'Dark', Icon: Moon }
+              };
+              const { next, label, Icon } = THEMES[themePref] ?? THEMES.auto;
+              return (
+                <button
+                  type="button"
+                  onClick={() => setThemePref(next)}
+                  className="mh-btn mh-btn--icon bg-mh-nav-fill text-mh-nav-text"
+                  title={`Appearance: ${label} — click for ${THEMES[next].label}`}
+                  aria-label={`Appearance: ${label}. Switch to ${THEMES[next].label}`}
+                >
+                  <Icon className="w-5 h-5" />
+                </button>
+              );
+            })()}
+          </div>
+        </div>
+      </header>
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+          HERO BAND: SOL CONTEXT + ACTIVE ROLE + 3-SOL DEMO STEPPER
+         ═══════════════════════════════════════════════════════════════════════ */}
+      <section className="mh-hero !py-5 sm:!py-6">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="flex flex-col gap-2 min-w-0">
+            <span className="mh-eyebrow mh-eyebrow--line !text-white">
+              Sol {23 + mission.demoScriptSol} · Séítah &amp; Western Delta · Plan {mission.activePlanVersion}
+            </span>
+            <h1 className="text-[28px] sm:text-[34px] leading-tight font-extrabold tracking-[-0.01em] m-0">
+              {ROLE_FILTER_PRESETS[currentRole].roleName}
+            </h1>
+            <p className="m-0 text-base max-w-3xl">{ROLE_FILTER_PRESETS[currentRole].description}</p>
+            <div className="flex flex-wrap items-center gap-2 font-mono text-[13px] text-mh-hero-label">
+              <span>L.CRS.EPSG4326 · 18.436°N, 77.456°E</span>
+              <span aria-hidden="true">·</span>
+              <span>PDS Analyst’s Notebook</span>
+              <span aria-hidden="true">·</span>
+              <button
+                type="button"
                 onClick={() => setUseFastApiProxy((prev) => !prev)}
-                className={`px-1.5 py-0.2 rounded border text-[9.5px] font-mono ${
-                  useFastApiProxy
-                    ? 'bg-[#2D7FF9]/20 text-[#60a5fa] border-[#2D7FF9]'
-                    : 'bg-[#0b0f14] text-slate-400 border-[#1f2a35]'
-                }`}
+                className="inline-flex items-center gap-2 min-h-11 px-4 rounded-full bg-white/10 hover:bg-white/20 text-white text-[13px] cursor-pointer"
                 title="Toggle FastAPI CORS proxy (http://localhost:8000/proxy?url= from map_2.py)"
               >
-                <Server className="w-2.5 h-2.5 inline mr-1" />
+                <Server className="w-4 h-4" />
                 {useFastApiProxy ? 'Proxy :8000 ON' : 'Direct CORS (Trek/USGS)'}
               </button>
             </div>
           </div>
-        </div>
 
-        {/* Center: SIMULATED AUTHENTICATED USER SWITCHER (Starts on Scientist) */}
-        <div className="flex items-center gap-1.5 bg-[#0b0f14] p-1 rounded-md border border-[#1f2a35]">
-          <span className="text-[10px] font-mono text-slate-400 px-1.5 hidden xl:inline flex items-center gap-1">
-            <UserCheck className="w-3 h-3 inline text-[#2D7FF9] mr-1" />
-            AUTH USER:
-          </span>
-
-          <button
-            onClick={() => handleRoleSwitch('scientist')}
-            className={`px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-              currentRole === 'scientist'
-                ? 'bg-[#2D7FF9] text-white shadow'
-                : 'text-slate-300 hover:text-white'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>👨‍🔬 Scientist</span>
-          </button>
-
-          <button
-            onClick={() => handleRoleSwitch('control')}
-            className={`px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-              currentRole === 'control'
-                ? 'bg-[#2D7FF9] text-white shadow'
-                : 'text-slate-300 hover:text-white'
-            }`}
-          >
-            <Compass className="w-3.5 h-3.5" />
-            <span>🛰️ Mission Control</span>
-            <span className="px-1 rounded bg-[#0b0f14]/60 text-[#35B17A] font-mono text-[10px]">
-              {mission.activePlanVersion}
+          <div className="flex flex-col gap-2 w-full sm:w-auto">
+            <span className="font-mono text-[13px] uppercase tracking-[0.12em] text-mh-hero-label">
+              Demo script
             </span>
-          </button>
-
-          <button
-            onClick={() => handleRoleSwitch('astronaut')}
-            className={`px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-              currentRole === 'astronaut'
-                ? 'bg-[#FF6B35] text-[#0b0f14] font-extrabold shadow'
-                : 'text-slate-300 hover:text-white'
-            }`}
-          >
-            <Navigation className="w-3.5 h-3.5" />
-            <span>🧑‍🚀 Astronaut HUD</span>
-          </button>
-        </div>
-
-        {/* Right: 3-Sol Demo Stepper + EVIDENCE Slide-Over + mission.json */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <div className="flex items-center gap-1 bg-[#0b0f14] px-2 py-1 rounded border border-[#1f2a35]">
-            <span className="text-[10px] font-mono text-[#FF6B35] font-bold">DEMO:</span>
-            {[
-              { sol: 1, label: 'Sol 1: Prior' },
-              { sol: 2, label: 'Sol 2: 12m Funnel' },
-              { sol: 3, label: 'Sol 3: SEP Alert' }
-            ].map((s) => (
-              <button
-                key={s.sol}
-                onClick={() => handleRunDemoSol(s.sol)}
-                className={`px-2 py-0.5 rounded font-mono text-[10.5px] font-bold border cursor-pointer ${
-                  mission.demoScriptSol === s.sol
-                    ? 'bg-[#FF6B35] text-[#0b0f14] border-[#FF6B35]'
-                    : 'bg-[#12181f] text-slate-300 border-[#1f2a35]'
-                }`}
-              >
-                {s.label}
-              </button>
-            ))}
+            <div className="mh-segmented !flex !flex-nowrap w-full sm:w-auto [&>button]:flex-1 [&>button]:!px-3 sm:[&>button]:!px-[22px] [&>button]:whitespace-nowrap" role="radiogroup" aria-label="Demo Sol">
+              {[
+                { sol: 1, label: 'Sol 1 · Prior' },
+                { sol: 2, label: 'Sol 2 · Funnel' },
+                { sol: 3, label: 'Sol 3 · SEP' }
+              ].map((s) => (
+                <button
+                  key={s.sol}
+                  type="button"
+                  role="radio"
+                  aria-checked={mission.demoScriptSol === s.sol}
+                  onClick={() => handleRunDemoSol(s.sol)}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
           </div>
-
-          <button
-            onClick={() => setShowEvidenceDrawer(true)}
-            className="px-2.5 py-1.5 rounded bg-[#E5C04A]/15 hover:bg-[#E5C04A]/25 text-[#E5C04A] border border-[#E5C04A] font-mono text-xs font-bold flex items-center gap-1 cursor-pointer"
-          >
-            <Database className="w-3.5 h-3.5" />
-            <span>EVIDENCE</span>
-          </button>
-
-          <button
-            onClick={() => setShowJsonModal(true)}
-            className="px-2 py-1.5 rounded bg-[#0b0f14] hover:bg-[#1f2a35] text-slate-300 border border-[#1f2a35] font-mono text-xs flex items-center gap-1 cursor-pointer"
-            title="Inspect shared mission.json v5 contract"
-          >
-            <FileJson className="w-3.5 h-3.5 text-[#2D7FF9]" />
-          </button>
         </div>
-      </header>
+      </section>
 
-      {/* Toast Notification Bar */}
+      {/* Toast Notification — floats, so the layout never jumps */}
       {toastMsg && (
-        <div className="bg-[#12181f] border-b-2 border-[#35B17A] px-4 py-1.5 text-xs font-mono text-[#35B17A] flex items-center justify-between">
-          <span className="font-bold">{toastMsg}</span>
-          <span className="text-slate-400">Map Center &amp; Zoom Preserved</span>
+        <div
+          className="fixed bottom-4 inset-x-4 sm:inset-x-auto sm:right-6 sm:max-w-md z-50"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="mh-alert !bg-mh-ok-bg !text-mh-ok shadow-mh">
+            <CheckCircle2 className="w-5 h-5 shrink-0" aria-hidden="true" />
+            <p className="m-0 flex-1 font-semibold">{toastMsg}</p>
+            <button
+              type="button"
+              onClick={() => setToastMsg(null)}
+              className="mh-btn mh-btn--icon !bg-transparent !shadow-none text-mh-ok"
+              aria-label="Dismiss notification"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════════
-          SINGLE-SCREEN WORKSPACE: PERSISTENT JEZERO MAP (LEFT) + ROLE LENS (RIGHT)
+          WORKSPACE: STICKY JEZERO MAP (LEFT) + ROLE DECISION DECK (RIGHT)
          ═══════════════════════════════════════════════════════════════════════ */}
-      <main className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 p-3 min-h-[calc(100vh-58px)]">
-        {/* LEFT COLUMN (7 Cols): PERSISTENT LEAFLET JEZERO MAP + 3 SIMULATED ROLE FILTERS BAR */}
-        <section className="lg:col-span-7 h-[540px] lg:h-auto flex flex-col bg-[#12181f] border border-[#1f2a35] rounded-md overflow-hidden relative">
-          {/* Top Map Sub-Bar: Active Role's 3 Simulated Filter Presets + Prior↔Posterior Slider */}
-          <div className="bg-[#12181f] border-b border-[#1f2a35] px-3 py-2 flex flex-wrap items-center justify-between gap-2 z-20">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-[10px] font-mono uppercase text-slate-400 flex items-center gap-1 mr-1">
-                <Filter className="w-3 h-3 text-[#2D7FF9]" />
-                <span>3 ROLE FILTERS ({currentRole.toUpperCase()}):</span>
-              </span>
-
-              {/* Filter Pill 1: Spectral & CRISM/PDS Fusion */}
-              <button
-                onClick={() => handleToggleRoleFilter('filter1_spectralFusion')}
-                className={`px-2 py-1 rounded text-[11px] font-mono font-bold border flex items-center gap-1 cursor-pointer ${
-                  activeFilters.filter1_spectralFusion
-                    ? 'bg-[#2D7FF9]/25 text-white border-[#2D7FF9]'
-                    : 'bg-[#0b0f14] text-slate-400 border-[#1f2a35]'
-                }`}
-              >
-                <span>1. CRISM Prior ↔ PDS Posterior</span>
-              </button>
-
-              {/* Filter Pill 2: Thermal Inertia / Slope Topography */}
-              {currentRole === 'scientist' ? (
-                <button
-                  onClick={() => handleToggleRoleFilter('filter2_thermalInertia')}
-                  className={`px-2 py-1 rounded text-[11px] font-mono font-bold border flex items-center gap-1 cursor-pointer ${
-                    activeFilters.filter2_thermalInertia
-                      ? 'bg-[#FF6B35]/25 text-[#FF6B35] border-[#FF6B35]'
-                      : 'bg-[#0b0f14] text-slate-400 border-[#1f2a35]'
-                  }`}
-                >
-                  <span>2. THEMIS Thermal (100m)</span>
-                </button>
-              ) : (
-                <button
-                  onClick={() => handleToggleRoleFilter('topographySlope')}
-                  className={`px-2 py-1 rounded text-[11px] font-mono font-bold border flex items-center gap-1 cursor-pointer ${
-                    activeFilters.topographySlope
-                      ? 'bg-[#E5C04A]/25 text-[#E5C04A] border-[#E5C04A]'
-                      : 'bg-[#0b0f14] text-slate-400 border-[#1f2a35]'
-                  }`}
-                >
-                  <span>2. MOLA+HRSC Slope &amp; NE Zones</span>
-                </button>
-              )}
-
-              {/* Filter Pill 3: PDS Targets & Routes */}
-              <button
-                onClick={() => handleToggleRoleFilter('filter3_pdsTargetsTraverse')}
-                className={`px-2 py-1 rounded text-[11px] font-mono font-bold border flex items-center gap-1 cursor-pointer ${
-                  activeFilters.filter3_pdsTargetsTraverse
-                    ? 'bg-[#35B17A]/25 text-[#35B17A] border-[#35B17A]'
-                    : 'bg-[#0b0f14] text-slate-400 border-[#1f2a35]'
-                }`}
-              >
-                <span>3. HiRISE 25cm + PDS Targets</span>
-              </button>
+      <main className="w-full max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_440px] xl:grid-cols-[minmax(0,1fr)_520px] gap-5 sm:gap-6 px-4 sm:px-6 py-6 sm:py-8 items-start">
+        {/* LEFT: PERSISTENT LEAFLET MAP CARD */}
+        <section
+          className="lg:sticky lg:top-6 flex flex-col bg-mh-card rounded-mh-lg shadow-mh overflow-hidden"
+          aria-label="Jezero map"
+        >
+          {/* Map header: role filter toggles */}
+          <div className="px-5 pt-5 pb-4 flex flex-col gap-3 border-b border-mh-sep">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <span className="mh-eyebrow">Map layers · {ROLE_LABELS[currentRole]}</span>
+              <span className="text-base text-mh-text2">Tap a filter to show or hide it</span>
             </div>
-
-            {/* Inline CRISM Prior ↔ PDS Posterior Slider on Map Header */}
-            {currentRole !== 'astronaut' && (
-              <div className="flex items-center gap-2 bg-[#0b0f14] px-2.5 py-1 rounded border border-[#2D7FF9]/60">
-                <span className="text-[10px] font-mono text-[#E5C04A] font-bold">
-                  CRISM Prior (±34%)
-                </span>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={mission.fusionSliderPct}
-                  onChange={(e) =>
-                    setMission((prev) => ({
-                      ...prev,
-                      fusionSliderPct: Number(e.target.value)
-                    }))
-                  }
-                  className="w-24 accent-[#35B17A] cursor-pointer"
-                  title="Slide from Orbital CRISM Prior (0%) to In-Situ PDS SuperCam/PIXL/SHERLOC Posterior (100%)"
-                />
-                <span className="text-[10px] font-mono text-[#35B17A] font-bold">
-                  PDS Posterior (±3.8%)
-                </span>
-              </div>
-            )}
+            <div className="flex flex-wrap gap-2">
+              <FilterToggle
+                on={activeFilters.filter1_spectralFusion}
+                onClick={() => handleToggleRoleFilter('filter1_spectralFusion')}
+              >
+                CRISM prior ↔ PDS posterior
+              </FilterToggle>
+              {currentRole === 'scientist' ? (
+                <FilterToggle
+                  on={activeFilters.filter2_thermalInertia}
+                  onClick={() => handleToggleRoleFilter('filter2_thermalInertia')}
+                >
+                  THEMIS thermal (100 m)
+                </FilterToggle>
+              ) : (
+                <FilterToggle
+                  on={activeFilters.topographySlope}
+                  onClick={() => handleToggleRoleFilter('topographySlope')}
+                >
+                  Slope &amp; not-evaluated zones
+                </FilterToggle>
+              )}
+              <FilterToggle
+                on={activeFilters.filter3_pdsTargetsTraverse}
+                onClick={() => handleToggleRoleFilter('filter3_pdsTargetsTraverse')}
+              >
+                HiRISE 25 cm + PDS targets
+              </FilterToggle>
+            </div>
           </div>
 
-          {/* Persistent Leaflet Map Container */}
-          <div className="relative flex-1 w-full h-full">
+          {/* Map */}
+          <div className="relative h-[420px] sm:h-[520px] lg:h-[calc(100vh-30rem)] lg:min-h-[360px] lg:max-h-[720px]">
             <div ref={mapContainerRef} className="w-full h-full z-10" />
 
-            {/* Floating Map Zoom & Center Controls (Top-Right over Map) */}
-            <div className="absolute top-3 right-3 z-20 flex flex-col gap-1.5">
+            <div className="absolute top-3 right-3 z-20 flex flex-col gap-2">
               <button
+                type="button"
                 onClick={() => mapInstanceRef.current?.zoomIn()}
-                className="p-2 rounded bg-[#0b0f14]/90 hover:bg-[#12181f] text-white border border-[#1f2a35] shadow"
-                title="Zoom In (up to HiRISE z17)"
+                className="mh-btn mh-btn--plain mh-btn--icon"
+                aria-label="Zoom in"
+                title="Zoom in (up to HiRISE z17)"
               >
-                <ZoomIn className="w-4 h-4" />
+                <ZoomIn className="w-5 h-5" />
               </button>
               <button
+                type="button"
                 onClick={() => mapInstanceRef.current?.zoomOut()}
-                className="p-2 rounded bg-[#0b0f14]/90 hover:bg-[#12181f] text-white border border-[#1f2a35] shadow"
-                title="Zoom Out"
+                className="mh-btn mh-btn--plain mh-btn--icon"
+                aria-label="Zoom out"
+                title="Zoom out"
               >
-                <ZoomOut className="w-4 h-4" />
+                <ZoomOut className="w-5 h-5" />
               </button>
               <button
-                onClick={() =>
-                  mapInstanceRef.current?.setView(JEZERO_CENTER, 14, { animate: true })
-                }
-                className="px-2 py-1 rounded bg-[#0b0f14]/90 hover:bg-[#12181f] text-[#60a5fa] border border-[#1f2a35] font-mono text-[10px] font-bold shadow"
+                type="button"
+                onClick={() => mapInstanceRef.current?.setView(JEZERO_CENTER, 14, { animate: true })}
+                className="mh-btn mh-btn--plain mh-btn--icon"
+                aria-label="Recenter on Séítah & Western Delta"
                 title="Recenter on Séítah & Western Delta"
               >
-                Jezero
+                <Crosshair className="w-5 h-5" />
               </button>
             </div>
+          </div>
 
-            {/* Bottom-Center Click-to-Inspect MOLA Elevation & Nearest Perseverance Sol Pill (from index_2.html) */}
-            <div className="absolute bottom-3 left-3 right-3 z-20 flex flex-wrap items-end justify-between gap-2 pointer-events-none">
-              <div className="pointer-events-auto bg-[#0b0f14]/95 border border-[#1f2a35] rounded px-3 py-2 text-[11px] font-mono shadow-xl max-w-lg">
-                <div className="flex items-center gap-2 text-[#FF6B35] font-bold">
-                  <MapPin className="w-3.5 h-3.5" />
-                  <span>SELECTED POINT (CLICK MAP FOR MOLA COG &amp; SOL):</span>
-                </div>
-                <div className="text-slate-200 mt-0.5">
-                  <strong>Lat:</strong> {clickedPoint.lat.toFixed(5)}° N ·{' '}
-                  <strong>Lon:</strong> {clickedPoint.lon.toFixed(5)}° E ·{' '}
-                  <strong>MOLA Elev:</strong>{' '}
-                  <span className="text-[#35B17A] font-bold">
-                    {clickedPoint.molaElevationM} m
-                  </span>{' '}
-                  <span className="text-[9.5px] text-slate-400">
-                    [{clickedPoint.elevationSource}]
-                  </span>
-                </div>
-                <div className="text-slate-400 text-[10px]">
-                  Nearest Perseverance Waypoint:{' '}
-                  <span className="text-white font-semibold">
-                    Sol {clickedPoint.nearestSol} ({clickedPoint.nearestWaypointName})
-                  </span>{' '}
-                  — {clickedPoint.distanceKm.toFixed(2)} km
-                </div>
+          {/* Map footer: selected point + prior/posterior fusion */}
+          <div className="p-5 grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div className="mh-tile">
+              <span className="mh-eyebrow">
+                <MapPin className="w-4 h-4" aria-hidden="true" />
+                Selected point
+              </span>
+              <p className="m-0 text-base font-mono">
+                {clickedPoint.lat.toFixed(5)}° N · {clickedPoint.lon.toFixed(5)}° E
+              </p>
+              <p className="m-0 text-base">
+                MOLA elevation <strong>{clickedPoint.molaElevationM} m</strong>
+              </p>
+              <p className="m-0 text-base text-mh-text2">
+                Sol {clickedPoint.nearestSol} · {clickedPoint.nearestWaypointName} ·{' '}
+                {clickedPoint.distanceKm.toFixed(2)} km
+              </p>
+              <p className="m-0 text-base text-mh-text2">Click the map to inspect a point.</p>
+            </div>
+
+            <div className="mh-tile">
+              <div className="flex items-baseline justify-between gap-2">
+                <label htmlFor="fusion-slider" className="mh-eyebrow">
+                  Data fusion
+                </label>
+                <span className="text-base font-semibold">{mission.fusionSliderPct}% posterior</span>
               </div>
-
-              {/* Right On-Map Legend: Compressed Funnel & Uncertainty Colormap */}
-              <div className="pointer-events-auto bg-[#0b0f14]/95 border border-[#1f2a35] rounded px-3 py-2 text-[10px] font-mono shadow-xl">
-                <div className="text-slate-200 font-bold uppercase mb-1 flex items-center justify-between gap-3">
-                  <span>BAYESIAN UNCERTAINTY (σ)</span>
-                  <span className="text-[#35B17A]">
-                    Fusion: {mission.fusionSliderPct}% Posterior
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[#35B17A] font-bold">±3.8% (PIXL/SHERLOC)</span>
-                  <div
-                    className="w-28 h-2.5 rounded border border-[#1f2a35]"
-                    style={{
-                      background:
-                        'linear-gradient(90deg, #35B17A 0%, #38bdf8 40%, #E5C04A 75%, #a855f7 100%)'
-                    }}
-                  />
-                  <span className="text-[#E5C04A] font-bold">±36% (CRISM Prior)</span>
-                </div>
+              <input
+                id="fusion-slider"
+                type="range"
+                min="0"
+                max="100"
+                value={mission.fusionSliderPct}
+                disabled={currentRole === 'astronaut'}
+                onChange={(e) =>
+                  setMission((prev) => ({ ...prev, fusionSliderPct: Number(e.target.value) }))
+                }
+                className="w-full h-11 cursor-pointer disabled:cursor-not-allowed"
+                aria-valuetext={`${mission.fusionSliderPct}% PDS posterior`}
+              />
+              <div
+                className="h-2.5 rounded-full"
+                aria-hidden="true"
+                style={{
+                  background:
+                    'linear-gradient(90deg, #a855f7 0%, #E5C04A 25%, #38bdf8 60%, #35B17A 100%)'
+                }}
+              />
+              <div className="flex justify-between gap-2 text-base text-mh-text2">
+                <span>CRISM prior · σ ±34%</span>
+                <span>PDS posterior · σ ±3.8%</span>
               </div>
             </div>
           </div>
         </section>
 
-        {/* RIGHT COLUMN (5 Cols): ROLE-SPECIFIC DECISION DECK */}
-        <aside className="lg:col-span-5 flex flex-col gap-3 overflow-y-auto max-h-[calc(100vh-76px)] pr-0.5">
-          {/* ═══════════════════════════════════════════════════════════════════
-              ROLE 1: SCIENTIST VIEW (DEFAULT INITIAL ROLE)
-              ("Compressing the Multi-Sol Rover Funnel" + Prior->Posterior + PDS Targets)
-             ═══════════════════════════════════════════════════════════════════ */}
+        {/* RIGHT: ROLE-SPECIFIC DECISION DECK (scrolls with the page) */}
+        <aside className="flex flex-col gap-5 sm:gap-6 min-w-0" aria-label="Decision panel">
+          {/* ═══════════════════════════ ROLE 1: SCIENTIST ═══════════════════════════ */}
           {currentRole === 'scientist' && (
             <>
-              {/* 1A. COMPRESSED DECISION FUNNEL: ROVER (4 SOLS) vs ASTRONAUT (12 MIN) */}
-              <div className="bg-[#12181f] border border-[#1f2a35] rounded-md p-3.5 space-y-2.5">
-                <div className="flex items-center justify-between border-b border-[#1f2a35] pb-2">
-                  <div className="flex items-center gap-2">
-                    <FastForward className="w-4 h-4 text-[#FF6B35]" />
-                    <h2 className="text-xs font-mono font-extrabold uppercase text-white">
-                      DECISION FUNNEL: ROVER (4 SOLS) → ASTRONAUT (12 MIN)
-                    </h2>
-                  </div>
-                  <span className="px-2 py-0.5 rounded bg-[#FF6B35]/20 text-[#FF6B35] font-mono text-[10px] font-bold">
-                    Decision Next to Data
-                  </span>
-                </div>
-
-                <p className="text-[11px] text-slate-300 leading-relaxed">
-                  Uncrewed rovers require at least 1 ground-planning Sol per funnel stage
-                  (Stand-off <span className="font-mono text-white">SuperCam</span> → Arm
-                  approach &amp; <span className="font-mono text-white">Abrasion</span> → Contact{' '}
-                  <span className="font-mono text-white">PIXL/SHERLOC</span>). Handheld
-                  astronaut tools compress this entire funnel into <strong>12 minutes on-site</strong>,
-                  updating the orbital <span className="font-mono text-[#E5C04A]">CRISM a-priori</span>{' '}
-                  map in real time:
+              <Card
+                eyebrow="Decision next to data"
+                title="Decision funnel: rover 4 sols → astronaut 12 min"
+                icon={FastForward}
+              >
+                <p className="m-0 text-base text-mh-text2">
+                  An uncrewed rover needs at least one ground-planning Sol per stage. Handheld
+                  astronaut tools compress the whole funnel into{' '}
+                  <strong className="text-mh-text">12 minutes on-site</strong>, updating the orbital
+                  CRISM a-priori map in real time.
                 </p>
+                <ol className="m-0 p-0 list-none grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[
+                    { n: 1, label: 'Orbital prior', tool: 'MRO / CRISM', time: '18 m/px · σ ±34%' },
+                    { n: 2, label: 'Stand-off', tool: 'SuperCam LIBS', time: 'Rover 1 Sol → 2 min' },
+                    { n: 3, label: 'Abrasion', tool: 'Rotary abrader', time: 'Rover 1 Sol → 4 min' },
+                    { n: 4, label: 'Contact', tool: 'PIXL + SHERLOC', time: 'Rover 2 Sol → 6 min' }
+                  ].map((st) => (
+                    <li key={st.n} className="mh-tile">
+                      <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">
+                        {st.n}. {st.label}
+                      </span>
+                      <span className="text-base font-semibold">{st.tool}</span>
+                      <span className="text-base text-mh-text2">{st.time}</span>
+                    </li>
+                  ))}
+                </ol>
+              </Card>
 
-                {/* 4-Stage Funnel Comparison Grid */}
-                <div className="grid grid-cols-4 gap-1.5 text-[10px] font-mono">
-                  <div className="p-2 rounded bg-[#0b0f14] border border-[#E5C04A]/60">
-                    <div className="text-[#E5C04A] font-bold">1. ORBITAL PRIOR</div>
-                    <div className="text-white font-semibold mt-0.5">MRO / CRISM</div>
-                    <div className="text-slate-400">18 m/px · σ ±34%</div>
-                  </div>
-                  <div className="p-2 rounded bg-[#0b0f14] border border-[#2D7FF9]/60">
-                    <div className="text-[#60a5fa] font-bold">2. STAND-OFF</div>
-                    <div className="text-white font-semibold mt-0.5">SuperCam LIBS</div>
-                    <div className="text-[#35B17A]">Rover: 1 Sol → 2m</div>
-                  </div>
-                  <div className="p-2 rounded bg-[#0b0f14] border border-[#2D7FF9]/60">
-                    <div className="text-[#60a5fa] font-bold">3. ABRASION</div>
-                    <div className="text-white font-semibold mt-0.5">Rotary Abrader</div>
-                    <div className="text-[#35B17A]">Rover: 1 Sol → 4m</div>
-                  </div>
-                  <div className="p-2 rounded bg-[#0b0f14] border border-[#35B17A]">
-                    <div className="text-[#35B17A] font-bold">4. CONTACT</div>
-                    <div className="text-white font-semibold mt-0.5">PIXL + SHERLOC</div>
-                    <div className="text-[#35B17A]">Rover: 2 Sols → 6m</div>
-                  </div>
-                </div>
-
-                {/* Prior vs Posterior Slider Control */}
-                <div className="p-2.5 rounded bg-[#0b0f14] border border-[#1f2a35] space-y-1.5">
-                  <div className="flex items-center justify-between text-[11px] font-mono">
-                    <span className="text-[#E5C04A] font-bold">
-                      ◀ A-Priori: CRISM 18m/px (σ = ±34%)
-                    </span>
-                    <span className="text-[#35B17A] font-bold">
-                      Posterior: PDS PIXL/SHERLOC (σ = ±3.8%) ▶
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={mission.fusionSliderPct}
-                    onChange={(e) =>
-                      setMission((prev) => ({
-                        ...prev,
-                        fusionSliderPct: Number(e.target.value)
-                      }))
-                    }
-                    className="w-full accent-[#35B17A] cursor-pointer"
-                  />
-                </div>
-              </div>
-
-              {/* 1B. SELECTED TARGET PDS ANALYST'S NOTEBOOK SPECTRAL & CHEMICAL INSPECTOR */}
               {selectedPoi && (
-                <div className="bg-[#12181f] border border-[#2D7FF9] rounded-md p-3.5 space-y-2">
-                  <div className="flex items-center justify-between border-b border-[#1f2a35] pb-2">
-                    <div>
-                      <span className="text-[10px] font-mono text-[#60a5fa] uppercase font-bold">
-                        PDS ANALYST’S NOTEBOOK RECORD · {selectedPoi.id}
-                      </span>
-                      <h3 className="text-xs font-extrabold text-white">
-                        {selectedPoi.name}
-                      </h3>
-                    </div>
-                    <span className="px-2 py-0.5 rounded bg-[#35B17A]/20 text-[#35B17A] font-mono text-[10px] font-bold">
-                      {selectedPoi.roverEquivalentSols} Rover Sols → {selectedPoi.astronautFunnelMin} min EVA
+                <Card
+                  eyebrow={`PDS Analyst’s Notebook · ${selectedPoi.id}`}
+                  title={selectedPoi.name}
+                  aside={
+                    <span className="mh-pill mh-pill--info">
+                      {selectedPoi.roverEquivalentSols} Sol → {selectedPoi.astronautFunnelMin} min
                     </span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
-                    <div className="p-2 rounded bg-[#0b0f14] border border-[#E5C04A]/50">
-                      <div className="text-[10px] text-[#E5C04A] font-bold">
-                        A-PRIORI (ORBITAL CRISM)
-                      </div>
-                      <div className="text-slate-200 mt-0.5">
-                        {selectedPoi.orbitalPrior.mineral}
-                      </div>
-                      <div className="text-[#E5C04A] mt-0.5">
-                        Est: {selectedPoi.orbitalPrior.hydrationEst} (Unc{' '}
-                        {selectedPoi.orbitalPrior.uncertainty})
-                      </div>
-                    </div>
-
-                    <div className="p-2 rounded bg-[#0b0f14] border border-[#35B17A]">
-                      <div className="text-[10px] text-[#35B17A] font-bold">
-                        POSTERIOR (PDS IN-SITU)
-                      </div>
-                      <div className="text-white font-bold mt-0.5">
-                        Hydration: {selectedPoi.pdsInSituPosterior.hydrationPosterior}
-                      </div>
-                      <div className="text-[#35B17A] mt-0.5">
-                        Updated Unc: {selectedPoi.pdsInSituPosterior.uncertaintyAfter}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="p-2.5 rounded bg-[#0b0f14] border border-[#1f2a35] space-y-1 text-[11px] font-mono">
-                    <div>
-                      <span className="text-[#60a5fa] font-bold">[SuperCam]: </span>
-                      <span className="text-slate-300">
-                        {selectedPoi.pdsInSituPosterior.supercam}
+                  }
+                  highlight
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="mh-tile">
+                      <span className="mh-pill mh-pill--warn self-start">A-priori (orbital)</span>
+                      <span className="text-base">{selectedPoi.orbitalPrior.mineral}</span>
+                      <span className="text-base text-mh-text2">
+                        Est. {selectedPoi.orbitalPrior.hydrationEst} · σ {selectedPoi.orbitalPrior.uncertainty}
                       </span>
                     </div>
-                    <div>
-                      <span className="text-[#E5C04A] font-bold">[Abrasion]: </span>
-                      <span className="text-slate-300">
-                        {selectedPoi.pdsInSituPosterior.abrasion}
+                    <div className="mh-tile">
+                      <span className="mh-pill mh-pill--ok self-start">Posterior (in situ)</span>
+                      <span className="text-base font-semibold">
+                        Hydration {selectedPoi.pdsInSituPosterior.hydrationPosterior}
                       </span>
-                    </div>
-                    <div>
-                      <span className="text-[#35B17A] font-bold">[PIXL XRF]: </span>
-                      <span className="text-slate-300">
-                        {selectedPoi.pdsInSituPosterior.pixl}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-[#a855f7] font-bold">[SHERLOC Raman]: </span>
-                      <span className="text-slate-300">
-                        {selectedPoi.pdsInSituPosterior.sherloc}
+                      <span className="text-base text-mh-text2">
+                        Updated σ {selectedPoi.pdsInSituPosterior.uncertaintyAfter}
                       </span>
                     </div>
                   </div>
-                </div>
+                  <dl className="m-0 flex flex-col gap-3">
+                    {[
+                      ['SuperCam', selectedPoi.pdsInSituPosterior.supercam],
+                      ['Abrasion', selectedPoi.pdsInSituPosterior.abrasion],
+                      ['PIXL XRF', selectedPoi.pdsInSituPosterior.pixl],
+                      ['SHERLOC Raman', selectedPoi.pdsInSituPosterior.sherloc]
+                    ].map(([k, v]) => (
+                      <div key={k} className="flex flex-col gap-1">
+                        <dt className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">{k}</dt>
+                        <dd className="m-0 text-base">{v}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </Card>
               )}
 
-              {/* 1C. IN-SITU FIELD DISCOVERY -> PROMOTE TO HIGH POI & UPDATE POSTERIOR */}
-              <div className="bg-[#12181f] border border-[#1f2a35] rounded-md p-3.5 space-y-2.5">
-                <div className="flex items-center justify-between border-b border-[#1f2a35] pb-2">
-                  <div>
-                    <h3 className="text-xs font-mono font-extrabold uppercase text-white">
-                      IN-SITU FIELD FUNNEL DISCOVERIES &amp; POI PRIORITY
-                    </h3>
-                    <p className="text-[11px] text-slate-400">
-                      Promote handheld discoveries to update the CRISM posterior &amp; route plan
-                    </p>
-                  </div>
-                </div>
-
-                {/* Highlighted Candidate Discovery FE-024-003 */}
+              <Card
+                eyebrow="Field discoveries"
+                title="In-situ discoveries & target priority"
+                subtitle="Promote a discovery to update the CRISM posterior and the route plan."
+              >
                 {mission.fieldEvents
                   .filter((fe) => fe.id === 'FE-024-003')
                   .map((fe) => (
-                    <div
-                      key={fe.id}
-                      className="p-2.5 rounded bg-[#0b0f14] border-2 border-[#38bdf8] space-y-1.5"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono text-xs font-extrabold text-[#38bdf8]">
-                          ★ {fe.id}: {fe.title}
-                        </span>
-                        <span className="px-1.5 py-0.5 rounded bg-[#35B17A]/20 text-[#35B17A] font-mono text-[10px] font-bold">
-                          12-min Funnel
-                        </span>
+                    <div key={fe.id} className="mh-tile !gap-2 ring-2 ring-mh-info">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-mono text-[13px] text-mh-text2">{fe.id}</span>
+                        <span className="mh-pill mh-pill--info">Funnel 12 min</span>
                       </div>
-                      <p className="text-[11px] text-slate-300">{fe.description}</p>
-                      <div className="flex items-center justify-between pt-1">
-                        <span className="text-[10px] font-mono text-slate-400">
-                          Source: {fe.source}
-                        </span>
-                        {!fe.promotedPoiId ? (
-                          <button
-                            onClick={() => handleRunRapidFunnelAndPromote(fe.id)}
-                            className="px-3 py-1 rounded bg-[#FF6B35] hover:bg-[#ff8255] text-[#0b0f14] font-mono text-[11px] font-extrabold flex items-center gap-1 shadow cursor-pointer"
-                          >
-                            <PlusCircle className="w-3.5 h-3.5" />
-                            <span>PROMOTE TO HIGH POI &amp; UPDATE POSTERIOR</span>
-                          </button>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded bg-[#35B17A]/20 text-[#35B17A] border border-[#35B17A] font-mono text-[10px] font-bold">
-                            ✓ PROMOTED TO POI-4 (POSTERIOR UPDATED)
+                      <strong className="text-base">{fe.title}</strong>
+                      <p className="m-0 text-base text-mh-text2">{fe.description}</p>
+                      <p className="m-0 text-base text-mh-text2">Source: {fe.source}</p>
+                      {!fe.promotedPoiId ? (
+                        <button
+                          type="button"
+                          onClick={() => handleRunRapidFunnelAndPromote(fe.id)}
+                          className="mh-btn mh-btn--primary self-start mt-1"
+                        >
+                          <PlusCircle className="w-5 h-5" />
+                          <span>Promote to high-priority POI</span>
+                        </button>
+                      ) : (
+                        <span className="mh-pill mh-pill--ok self-start mt-1">Promoted to POI-4</span>
+                      )}
+                    </div>
+                  ))}
+
+                <ol className="m-0 p-0 list-none flex flex-col gap-2" aria-label="Targets by priority">
+                  {sortedPois.map((poi, idx) => {
+                    const isSel = selectedPoiId === poi.id;
+                    const pr = PRIORITY_META[poi.priority] ?? PRIORITY_META.LOW;
+                    return (
+                      <li
+                        key={poi.id}
+                        className={`flex items-center gap-3 p-3 rounded-mh-md transition-colors ${
+                          isSel ? 'bg-mh-fill-blue' : 'bg-mh-fill'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedPoiId(poi.id);
+                            mapInstanceRef.current?.panTo([poi.lat, poi.lon]);
+                          }}
+                          aria-pressed={isSel}
+                          className="flex-1 min-w-0 min-h-11 flex items-center gap-3 text-left bg-transparent border-0 p-0 cursor-pointer text-mh-text"
+                        >
+                          <span className="w-9 h-9 shrink-0 rounded-full bg-mh-card font-mono text-base flex items-center justify-center">
+                            {poi.order}
                           </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-
-                {/* Prioritized POI List */}
-                <div className="space-y-1.5">
-                  {sortedPois.map((poi, idx) => (
-                    <div
-                      key={poi.id}
-                      onClick={() => {
-                        setSelectedPoiId(poi.id);
-                        mapInstanceRef.current?.panTo([poi.lat, poi.lon]);
-                      }}
-                      className={`p-2 rounded bg-[#0b0f14] border flex items-center justify-between gap-2 cursor-pointer ${
-                        selectedPoiId === poi.id ? 'border-[#2D7FF9]' : 'border-[#1f2a35]'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`w-6 h-6 rounded font-mono text-xs font-extrabold flex items-center justify-center ${
-                            poi.priority === 'HIGH'
-                              ? 'bg-[#E5484D] text-white'
-                              : poi.priority === 'MED'
-                              ? 'bg-[#E5C04A] text-[#0b0f14]'
-                              : 'bg-slate-600 text-white'
-                          }`}
-                        >
-                          {poi.order}
-                        </span>
-                        <div>
-                          <div className="text-xs font-bold text-white">
-                            {poi.id}: {poi.name}
-                          </div>
-                          <div className="text-[10px] font-mono text-[#35B17A]">
-                            [{poi.sourceBadge}] · Posterior: {poi.pdsInSituPosterior.hydrationPosterior}
-                          </div>
+                          <span className="min-w-0 flex flex-col gap-1">
+                            <span className="text-base font-semibold">
+                              {poi.id} · {poi.name.split('(')[0].trim()}
+                            </span>
+                            <span className="flex flex-wrap items-center gap-2">
+                              <span className={`mh-pill ${pr.cls}`}>{pr.label}</span>
+                              <span className="text-base text-mh-text2">
+                                {poi.pdsInSituPosterior.hydrationPosterior}
+                              </span>
+                            </span>
+                          </span>
+                        </button>
+                        <div className="flex flex-col sm:flex-row gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleMovePoiOrder(poi.id, 'UP')}
+                            disabled={idx === 0}
+                            className="mh-btn mh-btn--icon bg-mh-card text-mh-text"
+                            aria-label={`Move ${poi.id} up`}
+                          >
+                            <ArrowUp className="w-5 h-5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleMovePoiOrder(poi.id, 'DOWN')}
+                            disabled={idx === sortedPois.length - 1}
+                            className="mh-btn mh-btn--icon bg-mh-card text-mh-text"
+                            aria-label={`Move ${poi.id} down`}
+                          >
+                            <ArrowDown className="w-5 h-5" />
+                          </button>
                         </div>
-                      </div>
-
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleMovePoiOrder(poi.id, 'UP');
-                          }}
-                          disabled={idx === 0}
-                          className="p-1 rounded bg-[#12181f] border border-[#1f2a35] text-slate-300 disabled:opacity-30"
-                        >
-                          <ArrowUp className="w-3 h-3" />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleMovePoiOrder(poi.id, 'DOWN');
-                          }}
-                          disabled={idx === sortedPois.length - 1}
-                          className="p-1 rounded bg-[#12181f] border border-[#1f2a35] text-slate-300 disabled:opacity-30"
-                        >
-                          <ArrowDown className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                      </li>
+                    );
+                  })}
+                </ol>
 
                 <button
+                  type="button"
                   onClick={() => handleRoleSwitch('control')}
-                  className="w-full py-2.5 px-4 rounded bg-[#FF6B35] hover:bg-[#ff8255] text-[#0b0f14] font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg cursor-pointer"
+                  className="mh-btn mh-btn--primary mh-btn--lg mh-btn--block"
                 >
-                  <span>PROPOSE UPDATED PDS TARGETS TO MISSION CONTROL →</span>
+                  Propose targets to Mission Control →
                 </button>
-              </div>
+              </Card>
             </>
           )}
 
-          {/* ═══════════════════════════════════════════════════════════════════
-              ROLE 2: MISSION CONTROL VIEW
-              (Route Compare & Optimizer + PDS MEDA Weather + Plan Versioning v1->v2->v3)
-             ═══════════════════════════════════════════════════════════════════ */}
+          {/* ═══════════════════════════ ROLE 2: MISSION CONTROL ═══════════════════════════ */}
           {currentRole === 'control' && (
             <>
-              {/* 2A. ROUTE COMPARE & OPTIMIZER WIDGET */}
-              <div className="bg-[#12181f] border border-[#1f2a35] rounded-md p-3.5 space-y-2.5">
-                <div className="flex items-center justify-between border-b border-[#1f2a35] pb-2">
-                  <div className="flex items-center gap-2">
-                    <Compass className="w-4 h-4 text-[#2D7FF9]" />
-                    <h2 className="text-xs font-mono font-extrabold uppercase text-white">
-                      JEZERO ROUTE COMPARE &amp; OPTIMIZER
-                    </h2>
-                  </div>
-                  <span className="px-2 py-0.5 rounded bg-[#E5C04A]/20 text-[#E5C04A] font-mono text-[10px] font-bold">
-                    Thresholds = demo parameters
-                  </span>
-                </div>
-
-                <div className="space-y-2">
+              <Card
+                eyebrow="Optimizer"
+                title="Jezero route comparison"
+                icon={Compass}
+                subtitle="Thresholds are demo parameters. Select a route to show it on the map."
+              >
+                <div className="flex flex-col gap-2" role="radiogroup" aria-label="EVA route">
                   {Object.values(mission.routes).map((rt) => {
                     const isSelected = mission.selectedRoute === rt.id;
+                    const bufferOk = rt.bufferMin >= mission.timeWindow.returnBufferMin;
                     return (
-                      <div
+                      <button
                         key={rt.id}
-                        onClick={() =>
-                          setMission((prev) => ({ ...prev, selectedRoute: rt.id }))
-                        }
-                        className={`p-2.5 rounded bg-[#0b0f14] border cursor-pointer transition-all ${
-                          isSelected
-                            ? 'border-[#2D7FF9] ring-1 ring-[#2D7FF9]'
-                            : 'border-[#1f2a35] hover:border-slate-600'
+                        type="button"
+                        role="radio"
+                        aria-checked={isSelected}
+                        onClick={() => setMission((prev) => ({ ...prev, selectedRoute: rt.id }))}
+                        className={`w-full text-left p-4 rounded-mh-md border-2 cursor-pointer transition-colors flex flex-col gap-3 text-mh-text ${
+                          isSelected ? 'bg-mh-fill-blue border-mh-primary' : 'bg-mh-fill border-transparent'
                         }`}
                       >
-                        <div className="flex items-center justify-between">
-                          <span
-                            className="font-mono text-xs font-extrabold"
-                            style={{ color: rt.color }}
-                          >
-                            {isSelected ? '● ' : '○ '}
-                            {rt.name}
+                        <span className="flex items-start justify-between gap-3">
+                          <span className="flex items-start gap-2 min-w-0">
+                            <span
+                              className="mt-1.5 w-3 h-3 rounded-full shrink-0"
+                              style={{ background: rt.color }}
+                              aria-hidden="true"
+                            />
+                            <span className="text-base font-semibold">{rt.name}</span>
                           </span>
-                          <span
-                            className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-bold ${
-                              rt.bufferMin >= 45
-                                ? 'bg-[#35B17A]/20 text-[#35B17A]'
-                                : 'bg-[#E5484D]/20 text-[#E5484D]'
-                            }`}
-                          >
-                            Buffer: {rt.bufferMin}m
+                          <span className={`mh-pill shrink-0 ${bufferOk ? 'mh-pill--ok' : 'mh-pill--crit'}`}>
+                            {bufferOk ? 'Buffer OK' : 'Over limit'} · {rt.bufferMin} min
                           </span>
-                        </div>
-                        <div className="grid grid-cols-4 gap-1 mt-1.5 text-[10px] font-mono text-slate-300">
-                          <div>Dist: {rt.distanceKm} km</div>
-                          <div>Elev: +{rt.elevationGainM}m</div>
-                          <div>Max Slope: {rt.slopeMax}°</div>
-                          <div>Eval: {rt.dataCoveragePct}%</div>
-                        </div>
-                        <div className="text-[10.5px] font-mono text-[#60a5fa] mt-1">
-                          Yield: {rt.funnelYield}
-                        </div>
-                      </div>
+                        </span>
+                        <span className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          <Stat label="Distance" value={`${rt.distanceKm} km`} />
+                          <Stat label="Elevation gain" value={`+${rt.elevationGainM} m`} />
+                          <Stat label="Max slope" value={`${rt.slopeMax}°`} />
+                          <Stat label="Coverage" value={`${rt.dataCoveragePct}%`} />
+                        </span>
+                        <span className="text-base text-mh-text2">{rt.funnelYield}</span>
+                      </button>
                     );
                   })}
                 </div>
 
-                {/* Rejected Candidate Traceability */}
-                <div className="space-y-1">
-                  <div className="text-[10px] font-mono text-slate-400 uppercase font-bold">
-                    OPTIMIZER REJECTION REASONING:
-                  </div>
+                <div className="flex flex-col gap-2">
+                  <span className="mh-eyebrow">Rejected options</span>
                   {mission.optimizerResult.rejected.map((rej, idx) => (
-                    <div
-                      key={idx}
-                      className="p-2 rounded bg-[#0b0f14] border border-[#E5484D]/50 text-[11px] font-mono"
-                    >
-                      <div className="text-[#E5484D] font-bold">✕ {rej.option}</div>
-                      <div className="text-slate-300 mt-0.5">{rej.reason}</div>
+                    <div key={idx} className="mh-tile !gap-2">
+                      <span className="mh-pill mh-pill--crit self-start">Rejected</span>
+                      <strong className="text-base">{rej.option}</strong>
+                      <span className="text-base text-mh-text2">{rej.reason}</span>
                     </div>
                   ))}
                 </div>
-              </div>
+              </Card>
 
-              {/* 2B. TIME WINDOW & PDS MEDA WEATHER CONTEXT CARD */}
-              <div className="bg-[#12181f] border border-[#1f2a35] rounded-md p-3.5 space-y-2">
-                <div className="flex items-center justify-between border-b border-[#1f2a35] pb-2 flex-wrap gap-1">
-                  <div className="flex items-center gap-2">
-                    <Radio className="w-4 h-4 text-[#E5C04A]" />
-                    <h3 className="text-xs font-mono font-extrabold uppercase text-white">
-                      TIME WINDOW &amp; PDS MEDA ENVIRONMENT
-                    </h3>
-                  </div>
-                  <span className="px-2 py-0.5 rounded bg-[#E5C04A]/20 text-[#E5C04A] border border-[#E5C04A] font-mono text-[9.5px] font-bold">
-                    {mission.weatherCard.badge}
-                  </span>
+              <Card
+                eyebrow="Environment"
+                title="EVA window & MEDA weather"
+                icon={Radio}
+                aside={<span className="mh-pill mh-pill--warn">Historical data</span>}
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Stat
+                    tile
+                    label="Suggested EVA window"
+                    value={`${mission.timeWindow.suggestedStart} – ${mission.timeWindow.latestReturn} LST`}
+                  />
+                  <Stat tile label="Daylight" value="08:00–16:00 LST" />
                 </div>
+                <p className="m-0 text-base">{mission.weatherCard.medaContext}</p>
+                {sepAlertActive ? (
+                  <div className="mh-alert !bg-mh-crit-bg !text-mh-crit" role="alert">
+                    <AlertTriangle className="w-5 h-5 shrink-0" aria-hidden="true" />
+                    <p className="m-0 flex-1">
+                      <strong>Radiation alert:</strong> {mission.weatherCard.radContext}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="m-0 text-base text-mh-text2">{mission.weatherCard.radContext}</p>
+                )}
+                <p className="m-0 text-base text-mh-text2">{mission.weatherCard.badge}</p>
+              </Card>
 
-                <div className="p-2.5 rounded bg-[#0b0f14] border border-[#1f2a35] space-y-1.5 font-mono text-xs">
-                  <div className="flex justify-between text-[11px]">
-                    <span className="text-slate-400">SUGGESTED EVA WINDOW:</span>
-                    <span className="text-[#35B17A] font-bold">
-                      {mission.timeWindow.suggestedStart} – {mission.timeWindow.latestReturn} LST
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-slate-200">
-                    {mission.weatherCard.medaContext}
-                  </div>
-                  <div
-                    className={`text-[11px] ${
-                      sepAlertActive ? 'text-[#E5484D] font-bold' : 'text-slate-400'
-                    }`}
-                  >
-                    {mission.weatherCard.radContext}
-                  </div>
-                </div>
-              </div>
-
-              {/* 2C. PLAN VERSIONING LOG (Plan v1 -> v2 -> v3) */}
-              <div className="bg-[#12181f] border border-[#1f2a35] rounded-md p-3.5 space-y-2.5">
-                <div className="flex items-center justify-between border-b border-[#1f2a35] pb-2">
-                  <div className="flex items-center gap-2">
-                    <GitBranch className="w-4 h-4 text-[#FF6B35]" />
-                    <h3 className="text-xs font-mono font-extrabold uppercase text-white">
-                      PLAN VERSIONING (v1 → v2 → v3 TRACEABILITY)
-                    </h3>
-                  </div>
-                  <span className="px-2 py-0.5 rounded bg-[#35B17A]/20 text-[#35B17A] font-mono text-[10px] font-bold">
-                    Active: {mission.activePlanVersion}
-                  </span>
-                </div>
-
-                <div className="space-y-2">
+              <Card
+                eyebrow="Traceability"
+                title="Plan versions"
+                icon={GitBranch}
+                aside={<span className="mh-pill mh-pill--info">Active: {mission.activePlanVersion}</span>}
+              >
+                <ol className="m-0 p-0 list-none flex flex-col gap-2">
                   {mission.planVersions.map((pv) => {
                     const isCurrent = mission.activePlanVersion === pv.version;
                     return (
-                      <div
+                      <li
                         key={pv.version}
-                        className={`p-2.5 rounded bg-[#0b0f14] border ${
-                          isCurrent ? 'border-[#FF6B35]' : 'border-[#1f2a35]'
+                        className={`p-4 rounded-mh-md flex flex-col gap-2 ${
+                          isCurrent ? 'bg-mh-fill-blue' : 'bg-mh-fill'
                         }`}
                       >
-                        <div className="flex items-center justify-between">
-                          <span className="font-mono text-xs font-extrabold text-white">
-                            Plan {pv.version} · {pv.ts}
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="flex flex-col">
+                            <strong className="text-base">Plan {pv.version}</strong>
+                            <span className="font-mono text-[13px] text-mh-text2">{pv.ts}</span>
                           </span>
-                          <button
-                            onClick={() => {
-                              setMission((prev) => ({
-                                ...prev,
-                                activePlanVersion: pv.version,
-                                selectedRoute: pv.routeId
-                              }));
-                              triggerToast(`Approved & Sent Plan ${pv.version} to Astronaut HUD`);
-                            }}
-                            className={`px-2 py-0.5 rounded font-mono text-[10px] font-bold cursor-pointer ${
-                              isCurrent
-                                ? 'bg-[#35B17A]/20 text-[#35B17A] border border-[#35B17A]'
-                                : 'bg-[#2D7FF9] text-white'
-                            }`}
-                          >
-                            {isCurrent ? '✓ ACTIVE ON HUD' : `SEND ${pv.version}`}
-                          </button>
+                          {isCurrent ? (
+                            <span className="mh-pill mh-pill--ok">Active on HUD</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMission((prev) => ({
+                                  ...prev,
+                                  activePlanVersion: pv.version,
+                                  selectedRoute: pv.routeId
+                                }));
+                                triggerToast(`Plan ${pv.version} approved & sent to Astronaut HUD`);
+                              }}
+                              className="mh-btn mh-btn--tinted"
+                            >
+                              Send {pv.version}
+                            </button>
+                          )}
                         </div>
-                        <div className="text-[11px] font-mono text-[#E5C04A] mt-1">
-                          Trigger: {pv.trigger}
-                        </div>
-                        <div className="text-[11px] text-slate-300 mt-0.5">
-                          {pv.reason}
-                        </div>
-                      </div>
+                        <p className="m-0 text-base">
+                          <span className="text-mh-text2">Trigger:</span> {pv.trigger}
+                        </p>
+                        <p className="m-0 text-base text-mh-text2">{pv.reason}</p>
+                      </li>
+                    );
+                  })}
+                </ol>
+
+                <button
+                  type="button"
+                  onClick={() => handleRoleSwitch('astronaut')}
+                  className="mh-btn mh-btn--primary mh-btn--lg mh-btn--block"
+                >
+                  Send daily plan to Astronaut HUD →
+                </button>
+              </Card>
+            </>
+          )}
+
+          {/* ═══════════════════════════ ROLE 3: ASTRONAUT HUD ═══════════════════════════ */}
+          {currentRole === 'astronaut' && (
+            <>
+              <section
+                className={`p-5 sm:p-6 rounded-mh-lg shadow-mh flex flex-col gap-4 ${
+                  sepAlertActive ? 'bg-mh-crit-bg' : 'bg-mh-card'
+                }`}
+                aria-live="polite"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`mh-pill ${sepAlertActive ? 'mh-pill--crit' : 'mh-pill--ok'}`}>
+                    {sepAlertActive ? 'SEP alert: go to shelter' : 'On plan'}
+                  </span>
+                  <span className="text-base font-semibold">
+                    Light 02:10 · Buffer {mission.routes[mission.selectedRoute]?.bufferMin} min
+                  </span>
+                </div>
+                <p className="m-0 text-lg font-semibold">{activePlanObj.diffSummary}</p>
+                <button
+                  type="button"
+                  onClick={handleToggleHudLocalZoom}
+                  className="mh-btn mh-btn--tinted mh-btn--lg mh-btn--block !min-h-16"
+                >
+                  <Crosshair className="w-5 h-5" />
+                  <span>{hudLocalZoom ? 'Back to sector view' : '1:250 target zoom'}</span>
+                </button>
+              </section>
+
+              <Card
+                eyebrow="Handheld funnel · 12 min on-site"
+                title={`Active target: ${selectedPoi.id} — ${selectedPoi.name.split('(')[0].trim()}`}
+                highlight
+              >
+                <div className="flex flex-col gap-2">
+                  {[
+                    {
+                      key: 'standoff',
+                      title: 'Step 1 · Handheld SuperCam LIBS/VISIR',
+                      time: '2 min (rover: 1 Sol)',
+                      body: selectedPoi.pdsInSituPosterior.supercam
+                    },
+                    {
+                      key: 'abrasion',
+                      title: 'Step 2 · Handheld rotary abrader',
+                      time: '4 min (rover: 1 Sol)',
+                      body: selectedPoi.pdsInSituPosterior.abrasion
+                    },
+                    {
+                      key: 'contact',
+                      title: 'Step 3 · Handheld PIXL XRF + SHERLOC Raman',
+                      time: '6 min (rover: 2 Sol)',
+                      body: selectedPoi.pdsInSituPosterior.pixl
+                    }
+                  ].map((step) => {
+                    const done = funnelStageProgress[step.key];
+                    return (
+                      <button
+                        key={step.key}
+                        type="button"
+                        aria-pressed={done}
+                        onClick={() =>
+                          setFunnelStageProgress((p) => ({ ...p, [step.key]: !p[step.key] }))
+                        }
+                        className={`w-full min-h-16 p-4 rounded-mh-md border-2 text-left flex items-start justify-between gap-3 cursor-pointer transition-colors text-mh-text ${
+                          done ? 'bg-mh-ok-bg border-mh-ok' : 'bg-mh-fill border-transparent'
+                        }`}
+                      >
+                        <span className="flex flex-col gap-1 min-w-0">
+                          <strong className="text-base">{step.title}</strong>
+                          <span className="font-mono text-[13px] text-mh-text2">{step.time}</span>
+                          <span className="text-base text-mh-text2">{step.body}</span>
+                        </span>
+                        <span className={`mh-pill shrink-0 ${done ? 'mh-pill--ok' : 'mh-pill--info'}`}>
+                          {done ? 'Done' : 'To do'}
+                        </span>
+                      </button>
                     );
                   })}
                 </div>
 
                 <button
-                  onClick={() => handleRoleSwitch('astronaut')}
-                  className="w-full py-2.5 px-4 rounded bg-[#FF6B35] hover:bg-[#ff8255] text-[#0b0f14] font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg cursor-pointer"
-                >
-                  <span>SEND DAILY PLAN TO ASTRONAUT HUD →</span>
-                </button>
-              </div>
-            </>
-          )}
-
-          {/* ═══════════════════════════════════════════════════════════════════
-              ROLE 3: ASTRONAUT HUD VIEW
-              (<3s Scan, >=64px Glove Targets, Rapid 12-Min Field Funnel Executor)
-             ═══════════════════════════════════════════════════════════════════ */}
-          {currentRole === 'astronaut' && (
-            <>
-              {/* 3A. TOP STATUS & PLAN DIFF BANNER */}
-              <div
-                className={`p-3.5 rounded-md border-2 shadow-xl ${
-                  sepAlertActive
-                    ? 'bg-[#E5484D]/25 border-[#E5484D]'
-                    : 'bg-[#12181f] border-[#35B17A]'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`px-2.5 py-0.5 rounded font-mono text-xs font-extrabold ${
-                          sepAlertActive
-                            ? 'bg-[#E5484D] text-white'
-                            : 'bg-[#35B17A] text-[#0b0f14]'
-                        }`}
-                      >
-                        {sepAlertActive ? 'ALERT: SEP SHELTER RULE' : 'ON PLAN'}
-                      </span>
-                      <span className="font-mono text-xs font-bold text-white">
-                        Light: 02:10 · Buffer: OK ({mission.routes[mission.selectedRoute]?.bufferMin}m)
-                      </span>
-                    </div>
-                    <div className="font-mono text-xs text-slate-200 mt-1.5 font-bold">
-                      {activePlanObj.diffSummary}
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={handleToggleHudLocalZoom}
-                    className="min-h-[64px] px-3 rounded bg-[#FF6B35] text-[#0b0f14] font-mono text-xs font-extrabold uppercase flex items-center gap-1.5 shrink-0 cursor-pointer"
-                  >
-                    <Crosshair className="w-4 h-4" />
-                    <span>{hudLocalZoom ? 'SECTOR VIEW' : '1:250 POI ZOOM'}</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* 3B. RAPID ON-SITE HANDHELD FUNNEL EXECUTOR (COMPRESSES 4 ROVER SOLS INTO 12 MIN) */}
-              <div className="bg-[#12181f] border-2 border-[#2D7FF9] rounded-md p-3.5 space-y-2.5">
-                <div className="flex items-center justify-between border-b border-[#1f2a35] pb-2">
-                  <div>
-                    <span className="text-[10px] font-mono text-[#FF6B35] font-bold uppercase">
-                      RAPID HANDHELD FIELD FUNNEL (4 ROVER SOLS → 12 MIN ON-SITE)
-                    </span>
-                    <h3 className="text-sm font-mono font-extrabold text-white">
-                      ACTIVE TARGET: {selectedPoi.id} — {selectedPoi.name.split('(')[0]}
-                    </h3>
-                  </div>
-                </div>
-
-                {/* 3 Glove-Sized Funnel Steps (>= 64px height each) */}
-                <div className="space-y-2">
-                  <button
-                    onClick={() =>
-                      setFunnelStageProgress((p) => ({ ...p, standoff: !p.standoff }))
-                    }
-                    className={`w-full min-h-[64px] p-3 rounded border-2 text-left font-mono flex items-center justify-between cursor-pointer ${
-                      funnelStageProgress.standoff
-                        ? 'bg-[#35B17A]/15 border-[#35B17A] text-white'
-                        : 'bg-[#0b0f14] border-[#1f2a35] text-slate-300'
-                    }`}
-                  >
-                    <div>
-                      <div className="text-xs font-extrabold text-[#35B17A]">
-                        STEP 1 (2 MIN vs 1 SOL) · HANDHELD SUPERCAM LIBS/VISIR
-                      </div>
-                      <div className="text-[11px] text-slate-200 mt-0.5">
-                        {selectedPoi.pdsInSituPosterior.supercam}
-                      </div>
-                    </div>
-                    <span className="px-2 py-1 rounded bg-[#0b0f14] text-xs font-bold text-[#35B17A]">
-                      [DONE]
-                    </span>
-                  </button>
-
-                  <button
-                    onClick={() =>
-                      setFunnelStageProgress((p) => ({ ...p, abrasion: !p.abrasion }))
-                    }
-                    className={`w-full min-h-[64px] p-3 rounded border-2 text-left font-mono flex items-center justify-between cursor-pointer ${
-                      funnelStageProgress.abrasion
-                        ? 'bg-[#35B17A]/15 border-[#35B17A] text-white'
-                        : 'bg-[#0b0f14] border-[#1f2a35] text-slate-300'
-                    }`}
-                  >
-                    <div>
-                      <div className="text-xs font-extrabold text-[#E5C04A]">
-                        STEP 2 (4 MIN vs 1 SOL) · HANDHELD ROTARY ABRADER
-                      </div>
-                      <div className="text-[11px] text-slate-200 mt-0.5">
-                        {selectedPoi.pdsInSituPosterior.abrasion}
-                      </div>
-                    </div>
-                    <span className="px-2 py-1 rounded bg-[#0b0f14] text-xs font-bold text-[#35B17A]">
-                      [ABRADE OK]
-                    </span>
-                  </button>
-
-                  <button
-                    onClick={() =>
-                      setFunnelStageProgress((p) => ({ ...p, contact: !p.contact }))
-                    }
-                    className={`w-full min-h-[64px] p-3 rounded border-2 text-left font-mono flex items-center justify-between cursor-pointer ${
-                      funnelStageProgress.contact
-                        ? 'bg-[#35B17A]/15 border-[#35B17A] text-white'
-                        : 'bg-[#0b0f14] border-[#1f2a35] text-slate-300'
-                    }`}
-                  >
-                    <div>
-                      <div className="text-xs font-extrabold text-[#60a5fa]">
-                        STEP 3 (6 MIN vs 2 SOLS) · HANDHELD PIXL XRF + SHERLOC RAMAN
-                      </div>
-                      <div className="text-[11px] text-slate-200 mt-0.5">
-                        {selectedPoi.pdsInSituPosterior.pixl}
-                      </div>
-                    </div>
-                    <span className="px-2 py-1 rounded bg-[#0b0f14] text-xs font-bold text-[#35B17A]">
-                      [±3.8% UNC]
-                    </span>
-                  </button>
-                </div>
-
-                {/* Big Glove CTA: Complete Funnel & Update Orbital CRISM Prior on Map */}
-                <button
+                  type="button"
                   onClick={() => handleRunRapidFunnelAndPromote('FE-024-003')}
-                  className="w-full min-h-[68px] px-4 py-3 rounded-md bg-[#E5C04A] hover:bg-[#f3ce58] text-[#0b0f14] font-mono font-extrabold text-xs uppercase flex items-center justify-center gap-2 shadow-xl cursor-pointer"
+                  className="mh-btn mh-btn--primary mh-btn--lg mh-btn--block !min-h-16"
                 >
                   <Zap className="w-5 h-5 shrink-0" />
                   <span>
                     {isRunningFunnelAnim
-                      ? 'UPDATING CRISM PRIOR → PDS POSTERIOR...'
-                      : 'LOG 12-MIN PDS FUNNEL READING & UPDATE MAP POSTERIOR'}
+                      ? 'Updating posterior…'
+                      : 'Log funnel reading & update map'}
                   </span>
                 </button>
-              </div>
+              </Card>
             </>
           )}
         </aside>
@@ -2357,69 +2173,61 @@ export default function MissionPlanner() {
           EVIDENCE & PDS SOURCES SLIDE-OVER DRAWER
          ═══════════════════════════════════════════════════════════════════════ */}
       {showEvidenceDrawer && (
-        <div className="fixed inset-0 z-50 bg-black/75 flex justify-end">
-          <div className="w-full max-w-xl bg-[#12181f] border-l-2 border-[#E5C04A] h-full flex flex-col justify-between p-4 overflow-hidden shadow-2xl">
-            <div className="flex items-center justify-between border-b border-[#1f2a35] pb-3">
-              <div>
-                <h2 className="text-sm font-mono font-extrabold uppercase text-white">
-                  EVIDENCE · NASA TREK WMTS, USGS COG &amp; PDS NOTEBOOK SOURCES
+        <div
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex justify-end"
+          onClick={() => setShowEvidenceDrawer(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="evidence-title"
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-xl bg-mh-bg sm:rounded-l-mh-xl h-full flex flex-col gap-4 p-5 sm:p-6 overflow-hidden shadow-mh"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex flex-col gap-1">
+                <span className="mh-eyebrow mh-eyebrow--line">Evidence</span>
+                <h2 id="evidence-title" className="m-0 text-[22px] leading-tight font-bold">
+                  NASA Trek, USGS & PDS sources
                 </h2>
-                <p className="text-xs text-slate-400">
-                  Every layer and reading carries its exact mission + instrument badge and limits.
+                <p className="m-0 text-base text-mh-text2">
+                  Every layer lists its mission, instrument, resolution and limits.
                 </p>
               </div>
               <button
+                type="button"
                 onClick={() => setShowEvidenceDrawer(false)}
-                className="p-1.5 rounded bg-[#0b0f14] border border-[#1f2a35] text-slate-300 hover:text-white cursor-pointer"
+                className="mh-btn mh-btn--icon bg-mh-card text-mh-text shrink-0"
+                aria-label="Close"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto my-3 space-y-3 pr-1 font-mono text-xs">
-              <div className="text-[#60a5fa] font-bold uppercase">
-                1. STREAMED JEZERO RASTER LAYERS (FROM index_2.html)
-              </div>
+            <div className="flex-1 overflow-y-auto flex flex-col gap-3 -mx-1 px-1">
+              <span className="mh-eyebrow">Raster layers</span>
               {JEZERO_RASTER_CATALOG.map((lyr) => (
-                <div
-                  key={lyr.id}
-                  className="p-2.5 rounded bg-[#0b0f14] border border-[#1f2a35] flex items-center justify-between"
-                >
-                  <div>
-                    <div className="text-white font-bold">{lyr.name}</div>
-                    <div className="text-[10px] text-slate-400">
-                      [{lyr.instrument}] · Resolution: {lyr.res}
-                    </div>
+                <div key={lyr.id} className="p-4 rounded-mh-md bg-mh-card shadow-mh flex items-start justify-between gap-3">
+                  <div className="flex flex-col gap-1 min-w-0">
+                    <strong className="text-base">{lyr.name}</strong>
+                    <span className="text-base text-mh-text2">
+                      {lyr.instrument} · {lyr.res}
+                    </span>
                   </div>
-                  <span className="px-2 py-0.5 rounded bg-[#35B17A]/20 text-[#35B17A] text-[10px] font-bold">
-                    Cov: {lyr.coveragePct}%
-                  </span>
+                  <span className="mh-pill mh-pill--ok shrink-0">Coverage {lyr.coveragePct}%</span>
                 </div>
               ))}
 
-              <div className="text-[#E5C04A] font-bold uppercase pt-2">
-                2. AMBER “NOT EVALUATED” ZONES IN JEZERO SECTOR
-              </div>
+              <span className="mh-eyebrow mt-3">Not-evaluated zones</span>
               {JEZERO_NOT_EVALUATED_ZONES.map((z) => (
-                <div
-                  key={z.id}
-                  className="p-2.5 rounded bg-[#0b0f14] border border-[#E5C04A] space-y-1"
-                >
-                  <div className="text-[#E5C04A] font-bold">
-                    [{z.id}] {z.name}
-                  </div>
-                  <div className="text-[11px] text-slate-300">{z.reason}</div>
-                  <div className="text-[10px] text-slate-400">Limit: {z.limit}</div>
+                <div key={z.id} className="p-4 rounded-mh-md bg-mh-card shadow-mh flex flex-col gap-2">
+                  <span className="mh-pill mh-pill--warn self-start">Not evaluated · {z.id}</span>
+                  <strong className="text-base">{z.name}</strong>
+                  <span className="text-base text-mh-text2">{z.reason}</span>
+                  <span className="text-base text-mh-text2">Limit: {z.limit}</span>
                 </div>
               ))}
             </div>
-
-            <button
-              onClick={() => setShowEvidenceDrawer(false)}
-              className="w-full py-2 rounded bg-[#2D7FF9] text-white font-mono text-xs font-bold cursor-pointer"
-            >
-              Close Evidence &amp; PDS Sources
-            </button>
           </div>
         </div>
       )}
@@ -2428,31 +2236,102 @@ export default function MissionPlanner() {
           SHARED CONTRACT MODAL (mission.json v5)
          ═══════════════════════════════════════════════════════════════════════ */}
       {showJsonModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-[#12181f] border border-[#2D7FF9] rounded-md max-w-3xl w-full max-h-[85vh] flex flex-col justify-between p-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-[#1f2a35] pb-2">
-              <span className="font-mono text-sm font-bold text-white">
-                SHARED STATE CONTRACT (mission.json v5 · Jezero PDS Edition)
-              </span>
+        <div
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setShowJsonModal(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="json-title"
+            onClick={(e) => e.stopPropagation()}
+            className="bg-mh-card rounded-mh-lg max-w-3xl w-full max-h-[85vh] flex flex-col gap-4 p-5 sm:p-6 shadow-mh"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex flex-col gap-1">
+                <span className="mh-eyebrow">Shared state contract</span>
+                <h2 id="json-title" className="m-0 text-[22px] leading-tight font-bold">
+                  mission.json v5
+                </h2>
+              </div>
               <button
+                type="button"
                 onClick={() => setShowJsonModal(false)}
-                className="p-1 rounded bg-[#0b0f14] text-slate-300 hover:text-white cursor-pointer"
+                className="mh-btn mh-btn--icon bg-mh-fill text-mh-text shrink-0"
+                aria-label="Close"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
-            <pre className="my-3 p-3 rounded bg-[#0b0f14] border border-[#1f2a35] text-[11px] font-mono text-[#35B17A] overflow-auto flex-1">
+            <pre className="m-0 p-4 rounded-mh-md bg-mh-fill text-base font-mono overflow-auto flex-1 select-text">
               {JSON.stringify(mission, null, 2)}
             </pre>
-            <button
-              onClick={() => setShowJsonModal(false)}
-              className="px-4 py-1.5 rounded bg-[#2D7FF9] text-white font-mono text-xs font-bold self-end cursor-pointer"
-            >
-              Close
-            </button>
           </div>
         </div>
       )}
     </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SMALL MISSION HUB LAYOUT HELPERS
+// ═══════════════════════════════════════════════════════════════════════════════
+const ROLE_LABELS = {
+  scientist: 'Scientist',
+  control: 'Mission Control',
+  astronaut: 'Astronaut HUD'
+};
+
+// Status always carries a word, never colour alone
+const PRIORITY_META = {
+  HIGH: { label: 'High', cls: 'mh-pill--crit' },
+  MED: { label: 'Medium', cls: 'mh-pill--warn' },
+  LOW: { label: 'Low', cls: 'mh-pill--info' }
+};
+
+function Card({ eyebrow, title, subtitle, icon: Icon, aside, highlight = false, children }) {
+  return (
+    <section
+      className={`bg-mh-card rounded-mh-lg shadow-mh p-5 sm:p-6 flex flex-col gap-4 ${
+        highlight ? 'ring-2 ring-mh-primary' : ''
+      }`}
+    >
+      <header className="flex items-start justify-between gap-3">
+        <div className="flex flex-col gap-1 min-w-0">
+          {eyebrow && <span className="mh-eyebrow">{eyebrow}</span>}
+          <h2 className="m-0 text-[22px] leading-tight font-bold flex items-start gap-2">
+            {Icon && <Icon className="w-6 h-6 mt-0.5 shrink-0 text-mh-primary dark:text-mh-link" aria-hidden="true" />}
+            <span>{title}</span>
+          </h2>
+          {subtitle && <p className="m-0 text-base text-mh-text2">{subtitle}</p>}
+        </div>
+        {aside && <div className="shrink-0">{aside}</div>}
+      </header>
+      {children}
+    </section>
+  );
+}
+
+function Stat({ label, value, tile = false }) {
+  return (
+    <span className={`flex flex-col gap-0.5 ${tile ? 'mh-tile' : ''}`}>
+      <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">{label}</span>
+      <span className="text-base font-semibold">{value}</span>
+    </span>
+  );
+}
+
+function FilterToggle({ on, onClick, children }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={onClick}
+      className={`mh-btn !px-4 ${on ? 'mh-btn--tinted' : 'bg-mh-fill text-mh-text2'}`}
+    >
+      {on ? <CheckCircle2 className="w-5 h-5" aria-hidden="true" /> : <span className="w-5 h-5 rounded-full border-2 border-current" aria-hidden="true" />}
+      <span>{children}</span>
+      <span className="sr-only">{on ? '(on)' : '(off)'}</span>
+    </button>
   );
 }
