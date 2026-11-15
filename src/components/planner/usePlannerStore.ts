@@ -2,10 +2,14 @@ import { useEffect, useState } from 'react';
 import { SEED_STATE, newMissionId, nextPoiId, TODAY_SOL } from './model.ts';
 import type { DailyMission, FieldEvent, PlannerState, Poi, Priority } from './model.ts';
 
-const STORAGE_KEY = 'syncrowalk-planner-v1';
+// Versioned key: bump it whenever the saved shape or the seed changes, so an old state
+// left in the browser can never leak into the demo.
+const STORAGE_KEY = 'syncrowalk-planner-v2';
+const OLD_STORAGE_KEYS = ['syncrowalk-planner-v1'];
 
 const load = (): PlannerState => {
   try {
+    OLD_STORAGE_KEYS.forEach((k) => localStorage.removeItem(k));
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);

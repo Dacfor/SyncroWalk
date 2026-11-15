@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ComponentType, KeyboardEvent, SVGProps } from 'react';
-import { Check, ChevronDown, Compass, Sparkles } from 'lucide-react';
+import { Check, ChevronDown, Compass, RotateCcw, Sparkles } from 'lucide-react';
 import { AstronautIcon } from './icons.tsx';
 import type { Role } from './model.ts';
 
@@ -17,11 +17,13 @@ export const ROLES: { id: Role; label: string; description: string; Icon: Compon
 export default function UserMenu({
   role,
   onSelect,
-  pendingMissions
+  pendingMissions,
+  onResetDemo
 }: {
   role: Role;
   onSelect: (role: Role) => void;
   pendingMissions: number;
+  onResetDemo: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -133,6 +135,24 @@ export default function UserMenu({
               </button>
             );
           })}
+          <div className="border-t border-mh-sep mt-1 pt-1">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                onResetDemo();
+                close();
+              }}
+              className="w-full min-h-11 px-3 py-2 rounded-mh-sm border-0 text-left cursor-pointer flex items-center gap-3 text-mh-text bg-transparent hover:bg-mh-fill"
+              title="Restore the seed data and the default layers"
+            >
+              <RotateCcw className="w-5 h-5 shrink-0 text-mh-text2" aria-hidden="true" />
+              <span className="flex flex-col">
+                <span className="text-base font-semibold">Reset demo</span>
+                <span className="text-base text-mh-text2">Seed data, all optional layers off</span>
+              </span>
+            </button>
+          </div>
         </div>
       )}
     </div>

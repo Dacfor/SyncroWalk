@@ -314,53 +314,40 @@ const createRasterLayer = (L, cfg, zIndex) =>
     className: cfg.className ?? ''
   });
 
-// 3 Simulated Role Filter Presets (Auto-applied when switching authenticated user)
+// Optional map layers. Every one of them starts OFF for every role, at first start and at
+// every role switch: the only things visible by default are the base imagery and, for
+// Mission Control and the Astronaut, the route of the day.
+const DEFAULT_FILTERS = {
+  filter1_spectralFusion: false, // TES clay + CRISM prior zones vs in-situ posterior rings
+  filter2_thermalInertia: false, // THEMIS night IR
+  filter3_pdsTargetsTraverse: false, // Perseverance traverse + waypoints (MMGIS / PDS)
+  uncertainty: false, // 1σ veil of the orbital estimate, in-situ rings, residual halos
+  reachable: false, // area within a 40-min walk of a shelter (SEP rule)
+  topographySlope: false, // MOLA+HRSC hillshade, >15° segments, not-evaluated zones
+  atmosphereMeda: false, // TES dust index
+  hazards: false, // operational field hazards (boulder, soft soil)
+  shelters: false // shelters + 40-min return ring
+};
+
+// Layer toggles offered to each role in the map header: [filter key, label, hint]
+const L_FUSION = ['filter1_spectralFusion', 'CRISM prior ↔ PDS posterior', 'Orbital CRISM/TES mineral zones (prior) vs. rings measured in situ by PIXL/SHERLOC (posterior)'];
+const L_THERMAL = ['filter2_thermalInertia', 'THEMIS thermal (100 m)', 'THEMIS night IR, red–blue colormap: red = warm/high thermal inertia (bedrock), blue = cold (loose sand & dust)'];
+const L_TRAVERSE = ['filter3_pdsTargetsTraverse', 'Perseverance traverse (PDS)', 'Perseverance rover traverse (orange line) and its Sol waypoints from MMGIS/PDS'];
+const L_UNCERTAINTY = ['uncertainty', 'Uncertainty', '1σ of the mineralogy layer: a dense grey veil means an uncertain orbital estimate; green rings are in-situ measurements; halos show the residual vs the orbital prior'];
+const L_REACHABLE = ['reachable', 'Reachable area', 'Area within a 40-min walk of a shelter: what an EVA can reach under the SEP rule'];
+const L_SLOPE = ['topographySlope', 'Slope & not-evaluated zones', 'MOLA+HRSC hillshade, >15° slope segments (red) and not-evaluated zones (amber)'];
+const L_HAZARDS = ['hazards', 'Field hazards', 'Operational hazards reported in the field: boulders and soft soil'];
+const L_SHELTERS = ['shelters', 'Shelters & 40-min ring', 'SEP shelters and the line within a 40-min walk of each of them'];
+const LAYER_TOGGLES = {
+  scientist: [L_FUSION, L_THERMAL, L_TRAVERSE, L_UNCERTAINTY, L_REACHABLE],
+  control: [L_SLOPE, L_HAZARDS, L_SHELTERS, L_TRAVERSE],
+  astronaut: [L_FUSION, L_SLOPE, L_TRAVERSE]
+};
+
 const ROLE_FILTER_PRESETS = {
-  scientist: {
-    roleName: 'Scientist',
-    badgeColor: '#2D7FF9',
-    description:
-      'Defines points of interest on the map: type of interest, information to collect and samples to bring back.',
-    filters: {
-      // All optional layers start OFF for the scientist: clean map, turned on as needed
-      filter1_spectralFusion: false, // TES Clay + CRISM Prior vs PDS Posterior Fusion Polygons
-      filter2_thermalInertia: false, // THEMIS Night IR bedrock vs aeolian sand
-      filter3_pdsTargetsTraverse: false, // Perseverance traverse + waypoints (MMGIS / PDS)
-      uncertainty: false, // 1σ of the orbital mineralogy (grey veil) + in-situ rings
-      reachable: false, // area within a 40-min walk of a shelter (SEP rule)
-      topographySlope: false,
-      atmosphereMeda: false,
-      candidateRoutes: true
-    }
-  },
-  control: {
-    roleName: 'Mission Control (EVA Ops & Safety)',
-    badgeColor: '#35B17A',
-    description:
-      'Prioritises the points of interest, assigns instruments, plans each daily route from the base and sends the calendar to the crew.',
-    filters: {
-      filter1_spectralFusion: false,
-      filter2_thermalInertia: false,
-      filter3_pdsTargetsTraverse: true,
-      topographySlope: true, // MOLA+HRSC + >15° red slope segments + Amber Not-Evaluated zone
-      atmosphereMeda: true, // TES Dust + MEDA telemetry context
-      candidateRoutes: true // Route A vs Route B vs Route A-Mod
-    }
-  },
-  astronaut: {
-    roleName: 'Astronaut HUD (Suit Visor Execution)',
-    badgeColor: '#FF6B35',
-    description:
-      'Today’s EVA in focus: timed schedule, points of interest to reach and material to bring.',
-    filters: {
-      filter1_spectralFusion: false, // Spectral clutter OFF on visor
-      filter2_thermalInertia: false,
-      filter3_pdsTargetsTraverse: true, // Active POI + Field Hazard Markers
-      topographySlope: false,
-      atmosphereMeda: false,
-      candidateRoutes: true // Active route + Shelter Spur
-    }
-  }
+  scientist: { roleName: 'Scientist', filters: DEFAULT_FILTERS },
+  control: { roleName: 'Mission Control (EVA Ops & Safety)', filters: DEFAULT_FILTERS },
+  astronaut: { roleName: 'Astronaut', filters: DEFAULT_FILTERS }
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -725,9 +712,7 @@ export default function MissionPlanner() {
   const [mission, setMission] = useState(INITIAL_MISSION_V5);
 
   // 3. Active 3-Filter Preset + Manual Layer Opacity Controls
-  const [activeFilters, setActiveFilters] = useState(
-    ROLE_FILTER_PRESETS.scientist.filters
-  );
+  const [activeFilters, setActiveFilters] = useState({ ...DEFAULT_FILTERS });
   const [rasterOpacities, setRasterOpacities] = useState({
     hiriseJez: 1.0,
     ctxJez: 1.0,
@@ -827,6 +812,11 @@ export default function MissionPlanner() {
     analysis: null
   });
   const waypointsRef = useRef(FALLBACK_M20_WAYPOINTS);
+  // Live MMGIS traverse: kept here and drawn by the layer sync ONLY when its toggle is on.
+  // (It used to be added to the map as soon as the fetch resolved, whatever the filters said:
+  // that is why the Perseverance track showed up at first start.)
+  const liveTraverseRef = useRef(null);
+  const [traverseVersion, setTraverseVersion] = useState(0);
   const mapSectionRef = useRef(null);
 
   // Keep Leaflet in sync with its container size (full-width toggle, window resize, layout changes)
@@ -876,6 +866,23 @@ export default function MissionPlanner() {
   };
 
   // Toggle any of the 3 Simulated Role Filters manually
+  // "Reset demo" (user menu): seed data + default filters, so a stale browser state never dirties the demo
+  const handleResetDemo = () => {
+    planner.resetDemoData();
+    setActiveFilters({ ...DEFAULT_FILTERS });
+    setSelectedMissionId(null);
+    setSelectedPoiId(null);
+    setShownFeId(null);
+    setDraftPoint(null);
+    setPickMode(false);
+    setHighlightPts(null);
+    setAstronautSol(TODAY_SOL);
+    setRoleViews({ scientist: 'define', control: 'pois', astronaut: 'schedule' });
+    mapInstanceRef.current?.closePopup();
+    mapInstanceRef.current?.setView(JEZERO_CENTER, 14);
+    triggerToast('Demo reset: seed data and default layers restored.');
+  };
+
   const handleToggleRoleFilter = (filterKey) => {
     setActiveFilters((prev) => ({
       ...prev,
@@ -1047,11 +1054,8 @@ export default function MissionPlanner() {
               elev: f.properties?.elev_geoid ?? -2550
             }));
           }
-          if (vectorGroupsRef.current.traverse) {
-            L.geoJSON(travJson, {
-              style: { color: '#FF6B35', weight: 2.5, opacity: 0.85 }
-            }).addTo(vectorGroupsRef.current.traverse);
-          }
+          liveTraverseRef.current = travJson;
+          setTraverseVersion((v) => v + 1);
           appendStatus(
             `Live MMGIS Perseverance traverse loaded (${waypointsRef.current.length} waypoints).`
           );
@@ -1216,7 +1220,7 @@ export default function MissionPlanner() {
     const hazardGroup = vectorGroupsRef.current.hazards;
     hazardGroup.clearLayers();
 
-    if (activeFilters.topographySlope || currentRole === 'control') {
+    if (activeFilters.topographySlope && currentRole !== 'astronaut') {
       JEZERO_NOT_EVALUATED_ZONES.forEach((nez) => {
         L.rectangle(nez.bounds, {
           color: '#E5C04A',
@@ -1286,7 +1290,7 @@ export default function MissionPlanner() {
             .addTo(analysisGroup);
         });
       }
-      if (isSci) {
+      if (isSci && activeFilters.uncertainty) {
         // Residual halo: neutral when the in-situ value confirms the orbital prior, intense when it contradicts it
         planner.state.pois.forEach((poi) => {
           const { residual } = getHydration(poi);
@@ -1306,7 +1310,7 @@ export default function MissionPlanner() {
             .addTo(analysisGroup);
         });
       }
-      if (currentRole === 'control') {
+      if (currentRole !== 'scientist' && activeFilters.shelters) {
         shelterRings.forEach(({ shelter, ring }) => {
           L.polyline([...ring, ring[0]], { color: '#35B17A', weight: 2, dashArray: '8, 6', opacity: 0.9 })
             .bindTooltip(`${DEMO_ASSUMPTIONS.sepMinWarningMin}-min return to ${shelter.name} (SEP warning time)`, { sticky: true })
@@ -1318,7 +1322,8 @@ export default function MissionPlanner() {
       }
       // Rock alcove shelter (the base is drawn with the route layer)
       const alcove = SHELTERS.find((sh) => sh.id === 'ALCOVE');
-      L.circleMarker([alcove.lat, alcove.lon], { radius: 7, color: '#ffffff', weight: 2.5, fillColor: '#35B17A', fillOpacity: 1 })
+      if (isSci ? activeFilters.reachable : activeFilters.shelters)
+        L.circleMarker([alcove.lat, alcove.lon], { radius: 7, color: '#ffffff', weight: 2.5, fillColor: '#35B17A', fillOpacity: 1 })
         .bindTooltip(`${alcove.name} · SEP shelter`, { direction: 'top' })
         .addTo(analysisGroup);
     }
@@ -1327,15 +1332,18 @@ export default function MissionPlanner() {
     const travGroup = vectorGroupsRef.current.traverse;
     travGroup.clearLayers();
     if (activeFilters.filter3_pdsTargetsTraverse && currentRole !== 'astronaut') {
-      const fallbackLatLngs = FALLBACK_M20_WAYPOINTS.map((w) => [w.lat, w.lon]);
-      L.polyline(fallbackLatLngs, {
-        color: '#FF6B35',
-        weight: 2.5,
-        dashArray: '4, 4',
-        opacity: 0.85
-      })
-        .bindTooltip('Mars 2020 Perseverance Traverse [MMGIS / PDS]', { sticky: true })
-        .addTo(travGroup);
+      if (liveTraverseRef.current) {
+        L.geoJSON(liveTraverseRef.current, { style: { color: '#FF6B35', weight: 2.5, opacity: 0.85 } })
+          .bindTooltip('Mars 2020 Perseverance traverse [MMGIS, live]', { sticky: true })
+          .addTo(travGroup);
+      } else {
+        L.polyline(
+          FALLBACK_M20_WAYPOINTS.map((w) => [w.lat, w.lon]),
+          { color: '#FF6B35', weight: 2.5, dashArray: '4, 4', opacity: 0.85 }
+        )
+          .bindTooltip('Mars 2020 Perseverance traverse [built-in PDS waypoints]', { sticky: true })
+          .addTo(travGroup);
+      }
 
       FALLBACK_M20_WAYPOINTS.forEach((wp) => {
         L.circleMarker([wp.lat, wp.lon], {
@@ -1356,9 +1364,10 @@ export default function MissionPlanner() {
     const routeGroup = vectorGroupsRef.current.routes;
     routeGroup.clearLayers();
     const { pois: plannerPois, missions: plannerMissions } = planner.state;
+    // Control: the mission being edited, otherwise the route of the day
     const mapMission =
       currentRole === 'control'
-        ? plannerMissions.find((m) => m.id === selectedMissionId)
+        ? (plannerMissions.find((m) => m.id === selectedMissionId) ?? plannerMissions.find((m) => m.sol === TODAY_SOL))
         : currentRole === 'astronaut'
           ? plannerMissions.find((m) => m.sol === astronautSol && m.status !== 'draft')
           : null;
@@ -1392,7 +1401,7 @@ export default function MissionPlanner() {
     feGroup.clearLayers();
     const visibleFieldEvents =
       currentRole === 'control'
-        ? planner.state.fieldEvents
+        ? (activeFilters.hazards ? planner.state.fieldEvents : [])
         : currentRole === 'scientist'
           ? planner.state.fieldEvents.filter((fe) => fe.id === shownFeId)
           : [];
@@ -1451,7 +1460,7 @@ export default function MissionPlanner() {
         .bindTooltip('New point of interest', { permanent: true, direction: 'top', className: 'syncrowalk-tooltip' })
         .addTo(poiGroup);
     }
-  }, [activeFilters, currentRole, mission, rasterOpacities, selectedPoiId, planner.state, selectedMissionId, astronautSol, draftPoint, mapReady, shownFeId, highlightPts, shelterRings]);
+  }, [activeFilters, currentRole, mission, rasterOpacities, selectedPoiId, planner.state, selectedMissionId, astronautSol, draftPoint, mapReady, shownFeId, highlightPts, shelterRings, traverseVersion]);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // FIELD DISCOVERIES MAP (Scientist): a second, independent Leaflet map that lives
@@ -1630,7 +1639,7 @@ export default function MissionPlanner() {
     if (!map || !L) return;
     const m =
       currentRole === 'control'
-        ? planner.state.missions.find((x) => x.id === selectedMissionId)
+        ? (planner.state.missions.find((x) => x.id === selectedMissionId) ?? planner.state.missions.find((x) => x.sol === TODAY_SOL))
         : currentRole === 'astronaut'
           ? planner.state.missions.find((x) => x.sol === astronautSol && x.status !== 'draft')
           : null;
@@ -1746,7 +1755,7 @@ export default function MissionPlanner() {
   const pendingMissions = planner.state.missions.filter((m) => m.status !== 'sent').length;
   const mapRouteVisible =
     currentRole === 'control'
-      ? !!planner.state.missions.find((m) => m.id === selectedMissionId)?.poiIds.length
+      ? !!(planner.state.missions.find((m) => m.id === selectedMissionId) ?? planner.state.missions.find((m) => m.sol === TODAY_SOL))?.poiIds.length
       : currentRole === 'astronaut'
         ? !!planner.state.missions.find((m) => m.sol === astronautSol && m.status !== 'draft')?.poiIds.length
         : false;
@@ -1822,7 +1831,7 @@ export default function MissionPlanner() {
               );
             })()}
             {/* Signed-in user + role switcher (simulated users, no authentication yet) */}
-            <UserMenu role={currentRole} onSelect={handleRoleSwitch} pendingMissions={pendingMissions} />
+            <UserMenu role={currentRole} onSelect={handleRoleSwitch} pendingMissions={pendingMissions} onResetDemo={handleResetDemo} />
           </div>
         </div>
       </header>
@@ -1864,55 +1873,11 @@ export default function MissionPlanner() {
           {/* Map header: one compact row of layer toggles → more room for the map */}
           <div className="px-5 py-3 flex flex-wrap items-center gap-2 border-b border-mh-sep shrink-0">
             <span className="mh-eyebrow mr-1">Layers</span>
-            <FilterToggle
-              on={activeFilters.filter1_spectralFusion}
-              onClick={() => handleToggleRoleFilter('filter1_spectralFusion')}
-              hint="Orbital CRISM/TES mineral zones (prior) vs. rings measured in situ by PIXL/SHERLOC (posterior)"
-            >
-              CRISM prior ↔ PDS posterior
-            </FilterToggle>
-            {currentRole === 'scientist' ? (
-              <FilterToggle
-                on={activeFilters.filter2_thermalInertia}
-                onClick={() => handleToggleRoleFilter('filter2_thermalInertia')}
-                hint="THEMIS night IR, red–blue colormap: red = warm/high thermal inertia (bedrock), blue = cold (loose sand & dust)"
-              >
-                THEMIS thermal (100 m)
+            {LAYER_TOGGLES[currentRole].map(([key, label, hint]) => (
+              <FilterToggle key={key} on={activeFilters[key]} onClick={() => handleToggleRoleFilter(key)} hint={hint}>
+                {label}
               </FilterToggle>
-            ) : (
-              <FilterToggle
-                on={activeFilters.topographySlope}
-                onClick={() => handleToggleRoleFilter('topographySlope')}
-                hint="MOLA+HRSC hillshade, >15° slope segments (red) and not-evaluated zones (amber)"
-              >
-                Slope &amp; not-evaluated zones
-              </FilterToggle>
-            )}
-            <FilterToggle
-              on={activeFilters.filter3_pdsTargetsTraverse}
-              onClick={() => handleToggleRoleFilter('filter3_pdsTargetsTraverse')}
-              hint="Perseverance rover traverse (orange dotted line) and its Sol waypoints from MMGIS/PDS. HiRISE 25 cm imagery is always on."
-            >
-              Perseverance traverse (PDS)
-            </FilterToggle>
-            {currentRole === 'scientist' && (
-              <>
-                <FilterToggle
-                  on={activeFilters.uncertainty}
-                  onClick={() => handleToggleRoleFilter('uncertainty')}
-                  hint="1σ of the mineralogy layer: a dense grey veil means an uncertain orbital estimate; green rings are in-situ measurements"
-                >
-                  Uncertainty
-                </FilterToggle>
-                <FilterToggle
-                  on={activeFilters.reachable}
-                  onClick={() => handleToggleRoleFilter('reachable')}
-                  hint="Area within a 40-min walk of a shelter: what an EVA can reach under the SEP rule"
-                >
-                  Reachable area
-                </FilterToggle>
-              </>
-            )}
+            ))}
             {currentRole === 'scientist' && (
               <button
                 type="button"
@@ -1962,7 +1927,7 @@ export default function MissionPlanner() {
               activeFilters={activeFilters}
               routeVisible={mapRouteVisible}
               showDraft={currentRole === 'scientist' && !!draftPoint}
-              showFe={(currentRole === 'control' && planner.state.fieldEvents.length > 0) || (currentRole === 'scientist' && !!shownFeId)}
+              showFe={(currentRole === 'control' && activeFilters.hazards && planner.state.fieldEvents.length > 0) || (currentRole === 'scientist' && !!shownFeId)}
             />
 
             {pickMode && (
@@ -2508,10 +2473,8 @@ export default function MissionPlanner() {
               className="mh-btn mh-btn--danger self-start"
               onClick={() => {
                 if (window.confirm('Reset all points of interest and missions to the demo data?')) {
-                  planner.resetDemoData();
-                  setSelectedMissionId(null);
-                  setSelectedPoiId(null);
-                  triggerToast('Demo data restored');
+                  handleResetDemo();
+                  setShowJsonModal(false);
                 }
               }}
             >
@@ -2608,7 +2571,8 @@ function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe
   const notHud = currentRole !== 'astronaut';
   const showFusion = activeFilters.filter1_spectralFusion && notHud;
   const showThermal = activeFilters.filter2_thermalInertia && notHud;
-  const showHazards = activeFilters.topographySlope || currentRole === 'control';
+  const showHazards = activeFilters.topographySlope && notHud;
+  const showShelters = isSci ? activeFilters.reachable : activeFilters.shelters;
   const showTraverse = activeFilters.filter3_pdsTargetsTraverse && notHud;
 
   return (
@@ -2644,8 +2608,8 @@ function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe
 
           <LegendSection title="Base & route">
             <LegendRow swatch={<DotSwatch color="var(--mh-primary)" size={18} />}>Astronaut base (shelter)</LegendRow>
-            <LegendRow swatch={<DotSwatch color="#35B17A" size={14} />}>Delta basal alcove (SEP shelter)</LegendRow>
-            {currentRole === 'control' && (
+            {showShelters && <LegendRow swatch={<DotSwatch color="#35B17A" size={14} />}>Delta basal alcove (SEP shelter)</LegendRow>}
+            {!isSci && activeFilters.shelters && (
               <LegendRow swatch={<LineSwatch color="#35B17A" dash="5 4" width={2} />}>40-min return to a shelter</LegendRow>
             )}
             {routeVisible && (
@@ -2720,7 +2684,7 @@ function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe
               </LegendRow>
             </LegendSection>
           )}
-          {isSci && (
+          {isSci && activeFilters.uncertainty && (
             <LegendSection title="Residual vs orbital prior">
               <LegendRow swatch={<AreaSwatch stroke="#8E8E93" fill="#8E8E93" round />}>Confirms prior (&lt; 1σ)</LegendRow>
               <LegendRow swatch={<AreaSwatch stroke="#E5C04A" fill="#E5C04A" round />}>Partly contradicts (1–2σ)</LegendRow>
