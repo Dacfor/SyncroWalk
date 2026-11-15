@@ -25,8 +25,16 @@ export interface Poi {
   // Set when the POI was created from a field discovery (FE-…)
   fromFieldEventId?: string;
   // Optional legacy PDS readings (used by the CRISM prior ↔ PDS posterior layer)
-  pdsInSituPosterior?: { hydrationPosterior: string; uncertaintyAfter: string };
-  orbitalPrior?: { uncertainty: string };
+  pdsInSituPosterior?: {
+    hydrationPosterior: string;
+    uncertaintyAfter: string;
+    supercam?: string;
+    pixl?: string;
+    sherloc?: string;
+    biosignatureRating?: string;
+  };
+  orbitalPrior?: { uncertainty: string; mineral?: string; hydrationEst?: string };
+  geologicalUnit?: string;
 }
 
 export interface DailyMission {
@@ -142,7 +150,8 @@ export type ScheduleItem =
 
 export interface MissionPlan {
   stops: Poi[];
-  path: { lat: number; lon: number }[]; // base → stops → base (straight segments)
+  waypoints: { lat: number; lon: number }[]; // base → stops → base
+  path: { lat: number; lon: number }[]; // terrain-following geometry through every waypoint
   totalKm: number;
   walkMin: number;
   workMin: number;
@@ -152,12 +161,75 @@ export interface MissionPlan {
   equipment: string[];
 }
 
-/** Straight-line route from the base through every stop and back, with a timed schedule. */
+// ── Terrain-following route geometry ────────────────────────────────────────
+// Deterministic PRNG so every route keeps the same "hand-walked" shape across renders
+const hashString = (str: string) =>
+  [...str].reduce((h, c) => (Math.imul(h, 31) + c.charCodeAt(0)) >>> 0, 2166136261);
+const seededRandom = (seed: number) => {
+  let s = seed >>> 0;
+  return () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+};
+
+/**
+ * Turns a straight segment into a meandering, terrain-following walk.
+ * The path still starts and ends exactly on the two waypoints: only the in-between
+ * geometry is displaced (max lateral detour ≈ 35 m, one vertex every ~15 m).
+ */
+export const terrainLeg = (
+  a: { lat: number; lon: number },
+  b: { lat: number; lon: number },
+  seedKey: string
+): { lat: number; lon: number }[] => {
+  const rand = seededRandom(hashString(seedKey));
+  const dLat = b.lat - a.lat;
+  const dLon = b.lon - a.lon;
+  const len = Math.hypot(dLat, dLon);
+  if (len === 0) return [a, b];
+  const steps = Math.max(8, Math.round(len / 0.00025));
+  const nLat = -dLon / len; // unit normal to the segment
+  const nLon = dLat / len;
+  const amp = Math.min(len * 0.09, 0.0006);
+  const f1 = 1 + Math.floor(rand() * 2);
+  const f2 = 3 + Math.floor(rand() * 3);
+  const p1 = rand() * Math.PI * 2;
+  const p2 = rand() * Math.PI * 2;
+  const a1 = (0.6 + rand() * 0.4) * (rand() < 0.5 ? -1 : 1);
+  const out = [a];
+  for (let k = 1; k < steps; k++) {
+    const t = k / steps;
+    const envelope = Math.sin(Math.PI * t); // 0 at both waypoints
+    const wobble =
+      0.75 * a1 * Math.sin(2 * Math.PI * f1 * t + p1) +
+      0.25 * Math.sin(2 * Math.PI * f2 * t + p2) +
+      (rand() - 0.5) * 0.15;
+    const off = amp * envelope * wobble;
+    out.push({ lat: a.lat + dLat * t + nLat * off, lon: a.lon + dLon * t + nLon * off });
+  }
+  out.push(b);
+  return out;
+};
+
+const pathLengthKm = (pts: { lat: number; lon: number }[]) =>
+  pts.slice(1).reduce((sum, p, i) => sum + marsDistanceKm(pts[i], p), 0);
+
+/**
+ * Route from the base through every stop and back, following the terrain, with a timed schedule.
+ * Distances and walking times are measured along the terrain-following path.
+ */
 export const planMission = (mission: DailyMission, pois: Poi[]): MissionPlan => {
   const stops = mission.poiIds
     .map((id) => pois.find((p) => p.id === id))
     .filter((p): p is Poi => Boolean(p));
-  const path = [BASE, ...stops, BASE].map(({ lat, lon }) => ({ lat, lon }));
+  const waypoints = [BASE, ...stops, BASE].map(({ lat, lon }) => ({ lat, lon }));
+  const legs = waypoints.slice(1).map((to, i) => {
+    // Seed by the two endpoints: the same leg keeps the same shape in every mission
+    const from = waypoints[i];
+    return terrainLeg(from, to, `${from.lat},${from.lon}>${to.lat},${to.lon}`);
+  });
+  const path = legs.flatMap((leg, i) => (i === 0 ? leg : leg.slice(1)));
 
   const schedule: ScheduleItem[] = [{ kind: 'depart', time: mission.startTime }];
   let clock = toMin(mission.startTime);
@@ -166,8 +238,8 @@ export const planMission = (mission: DailyMission, pois: Poi[]): MissionPlan => 
   let workMin = 0;
   const names = [BASE.name, ...stops.map((s) => s.id), BASE.name];
 
-  for (let i = 0; i < path.length - 1; i++) {
-    const km = marsDistanceKm(path[i], path[i + 1]);
+  for (let i = 0; i < legs.length; i++) {
+    const km = pathLengthKm(legs[i]);
     const minutes = Math.max(1, Math.round((km / WALK_SPEED_KMH) * 60));
     totalKm += km;
     walkMin += minutes;
@@ -192,6 +264,7 @@ export const planMission = (mission: DailyMission, pois: Poi[]): MissionPlan => 
 
   return {
     stops,
+    waypoints,
     path,
     totalKm,
     walkMin,
@@ -234,8 +307,16 @@ export const SEED_STATE: PlannerState = {
       priority: 'HIGH',
       instruments: ['supercam', 'abrader', 'pixl', 'sherloc', 'drill'],
       durationMin: 45,
-      pdsInSituPosterior: { hydrationPosterior: '8.9 wt% H2O', uncertaintyAfter: '±3.8%' },
-      orbitalPrior: { uncertainty: '±32%' }
+      geologicalUnit: 'Fine-grained sulfate & clay lacustrine mudstone',
+      pdsInSituPosterior: {
+        hydrationPosterior: '8.9 wt% H2O',
+        uncertaintyAfter: '±3.8%',
+        supercam: 'LIBS/VISIR: Hydrated Mg-Fe sulfate + clay matrix confirmed at 3.2 m',
+        pixl: 'XRF Map: SO3 24.8 wt%, FeO 18.2 wt%, MgO 11.4 wt% (Ca/Mg sulfate veins)',
+        sherloc: 'Deep-UV Raman & Fluorescence: 1-ring & 2-ring aromatic organics co-located with sulfates',
+        biosignatureRating: 'VERY HIGH (Skinner/Wildcat PDS Class 1)'
+      },
+      orbitalPrior: { uncertainty: '±32%', mineral: 'MRO/CRISM: Fe/Mg Smectite Clay (18 m/px)', hydrationEst: '4.2 wt% H2O' }
     },
     {
       id: 'POI-2',
@@ -249,8 +330,20 @@ export const SEED_STATE: PlannerState = {
       priority: 'MED',
       instruments: ['supercam', 'abrader', 'pixl'],
       durationMin: 40,
-      pdsInSituPosterior: { hydrationPosterior: '4.8 wt% H2O', uncertaintyAfter: '±4.2%' },
-      orbitalPrior: { uncertainty: '±36%' }
+      geologicalUnit: 'Olivine cumulate with Fe-Mg carbonate alteration',
+      pdsInSituPosterior: {
+        hydrationPosterior: '4.8 wt% H2O',
+        uncertaintyAfter: '±4.2%',
+        supercam: 'LIBS/IR: Fo55 cumulate olivine grains + carbonate 2.3/2.5 µm bands',
+        pixl: 'XRF: Igneous olivine cumulate with secondary Fe-Mg carbonate & sulfate in fractures',
+        sherloc: 'UV Raman: Carbonate & perchlorate aqueous alteration products',
+        biosignatureRating: 'MODERATE (Aqueous Carbonation)'
+      },
+      orbitalPrior: {
+        uncertainty: '±36%',
+        mineral: 'MRO/CRISM: Regional Olivine + Mg-Carbonate (18 m/px)',
+        hydrationEst: '2.5 wt% H2O'
+      }
     },
     {
       id: 'POI-3',
@@ -264,8 +357,20 @@ export const SEED_STATE: PlannerState = {
       priority: 'LOW',
       instruments: ['camera', 'supercam'],
       durationMin: 30,
-      pdsInSituPosterior: { hydrationPosterior: '5.4 wt% H2O', uncertaintyAfter: '±5.1%' },
-      orbitalPrior: { uncertainty: '±29%' }
+      geologicalUnit: 'Fluvial sandstone & boulder conglomerate',
+      pdsInSituPosterior: {
+        hydrationPosterior: '5.4 wt% H2O',
+        uncertaintyAfter: '±5.1%',
+        supercam: 'RMI + LIBS: Diverse detrital clasts from Jezero watershed outside crater',
+        pixl: 'XRF: Mafic & phyllosilicate-rich detrital grains cemented by sulfate',
+        sherloc: 'Raman: Detrital carbonate + hydrated phases',
+        biosignatureRating: 'HIGH (Watershed Sample Diversity)'
+      },
+      orbitalPrior: {
+        uncertainty: '±29%',
+        mineral: 'MRO/CRISM: Low-Ca Pyroxene + Detrital Phyllosilicate',
+        hydrationEst: '3.1 wt% H2O'
+      }
     }
   ],
   missions: [

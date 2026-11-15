@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Crosshair, Eye, Gem, List, MapPin, MapPinPlus, Pencil, PlusCircle, Trash2 } from 'lucide-react';
+import { Crosshair, Gem, List, Map as MapIcon, MapPin, MapPinPlus, Pencil, PlusCircle, Trash2 } from 'lucide-react';
+import { DiscoveryDetail, DiscoveryList } from './Discoveries.tsx';
 import { Card, Label, PanelTabs, Segmented, TabPanel } from './ui.tsx';
 import { FIELD_EVENT_META, INTEREST_TYPES, PRIORITY_META } from './model.ts';
 import type { FieldEvent, Poi } from './model.ts';
@@ -38,7 +39,12 @@ export default function ScientistPanel({
   setView,
   fieldEvents,
   shownFeId,
-  onShowFe
+  onShowFe,
+  selectedFeId,
+  setSelectedFeId,
+  onOpenFieldMap,
+  pendingFe,
+  clearPendingFe
 }: {
   store: PlannerStore;
   draftPoint: LatLon;
@@ -53,13 +59,17 @@ export default function ScientistPanel({
   fieldEvents: FieldEvent[];
   shownFeId: string | null;
   onShowFe: (fe: FieldEvent | null) => void;
+  selectedFeId: string | null;
+  setSelectedFeId: (id: string) => void;
+  onOpenFieldMap: () => void;
+  pendingFe: FieldEvent | null; // set by the field discoveries map window ("Use as point of interest")
+  clearPendingFe: () => void;
 }) {
   const { state } = store;
   const [form, setForm] = useState(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fromFeId, setFromFeId] = useState<string | null>(null); // form pre-filled from a field discovery
-  const [selectedFeId, setSelectedFeId] = useState<string | null>(fieldEvents[0]?.id ?? null);
 
   // A point picked on the map fills the coordinate fields
   useEffect(() => {
@@ -163,6 +173,14 @@ export default function ScientistPanel({
     setView('define');
   };
   const poiFromFe = (feId: string) => state.pois.find((p) => p.fromFieldEventId === feId);
+
+  // "Use as point of interest" pressed in the field discoveries map window
+  useEffect(() => {
+    if (pendingFe) {
+      applyDiscovery(pendingFe);
+      clearPendingFe();
+    }
+  }, [pendingFe]);
   const fe = fieldEvents.find((f) => f.id === selectedFeId) ?? fieldEvents[0];
 
   return (
@@ -394,90 +412,28 @@ export default function ScientistPanel({
             subtitle="Logged by the crew during EVAs. Review one, show it on the map or turn it into a point of interest."
             icon={Gem}
           >
-            <ul className="m-0 p-0 list-none flex flex-col gap-2" aria-label="Discoveries">
-              {fieldEvents.map((item) => {
-                const m = FIELD_EVENT_META[item.class] ?? FIELD_EVENT_META['formation-interest'];
-                const isSel = item.id === fe?.id;
-                const linked = poiFromFe(item.id);
-                return (
-                  <li key={item.id}>
-                    <button
-                      type="button"
-                      aria-pressed={isSel}
-                      onClick={() => setSelectedFeId(item.id)}
-                      className={`w-full min-h-11 p-3 rounded-mh-md border-2 cursor-pointer text-left text-mh-text flex items-center gap-3 ${
-                        isSel ? 'bg-mh-fill-blue border-mh-primary' : 'bg-mh-fill border-transparent'
-                      }`}
-                    >
-                      <span className="text-[18px] leading-none shrink-0" style={{ color: m.color }} aria-hidden="true">
-                        ◆
-                      </span>
-                      <span className="min-w-0 flex flex-col">
-                        <span className="text-base font-semibold">{item.id}</span>
-                        <span className="text-base text-mh-text2">{m.label}</span>
-                      </span>
-                      {linked && <span className="mh-pill mh-pill--ok ml-auto shrink-0">{linked.id}</span>}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+            <button type="button" className="mh-btn mh-btn--tinted self-start" onClick={onOpenFieldMap}>
+              <MapIcon className="w-5 h-5" /> Open discoveries map
+            </button>
+            <DiscoveryList
+              fieldEvents={fieldEvents}
+              selectedId={fe?.id ?? null}
+              onSelect={(item) => setSelectedFeId(item.id)}
+              linkedPoiId={(id) => poiFromFe(id)?.id}
+            />
           </Card>
 
-          {fe && (() => {
-            const m = FIELD_EVENT_META[fe.class] ?? FIELD_EVENT_META['formation-interest'];
-            const linked = poiFromFe(fe.id);
-            const shown = shownFeId === fe.id;
-            return (
-              <Card eyebrow={fe.id} title={fe.title} highlight={shown}>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="mh-pill" style={{ background: `${m.color}26`, color: 'var(--mh-text)' }}>
-                    {m.label}
-                  </span>
-                  <span className={`mh-pill ${fe.status === 'confirmed' ? 'mh-pill--ok' : 'mh-pill--warn'}`}>
-                    {fe.status === 'confirmed' ? 'Confirmed' : 'Needs review'}
-                  </span>
-                  <span className="mh-pill mh-pill--info">Confidence {Math.round(fe.confidence * 100)}%</span>
-                </div>
-                <p className="m-0 text-base">{fe.description}</p>
-                <dl className="m-0 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {[
-                    ['Logged', fe.ts],
-                    ['Source', fe.source],
-                    ['Method', fe.method],
-                    ['Image', fe.photo],
-                    ['Location', `${fe.lat.toFixed(4)}° N · ${fe.lon.toFixed(4)}° E`]
-                  ].map(([k, v]) => (
-                    <div key={k} className="flex flex-col gap-0.5 min-w-0">
-                      <dt className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">{k}</dt>
-                      <dd className="m-0 text-base break-words">{v}</dd>
-                    </div>
-                  ))}
-                </dl>
-                <div className="mh-tile !gap-1">
-                  <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">Field directive</span>
-                  <span className="text-base">{fe.actionDirective}</span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className={`mh-btn ${shown ? 'mh-btn--plain' : 'mh-btn--tinted'}`}
-                    aria-pressed={shown}
-                    onClick={() => onShowFe(shown ? null : fe)}
-                  >
-                    <Eye className="w-5 h-5" /> {shown ? 'Hide from map' : 'Show on map'}
-                  </button>
-                  {linked ? (
-                    <span className="mh-pill mh-pill--ok self-center">Already a point of interest · {linked.id}</span>
-                  ) : (
-                    <button type="button" className="mh-btn mh-btn--primary" onClick={() => applyDiscovery(fe)}>
-                      <PlusCircle className="w-5 h-5" /> Use as point of interest
-                    </button>
-                  )}
-                </div>
-              </Card>
-            );
-          })()}
+          {fe && (
+            <Card eyebrow={fe.id} title={fe.title} highlight={shownFeId === fe.id}>
+              <DiscoveryDetail
+                fe={fe}
+                linkedPoiId={poiFromFe(fe.id)?.id}
+                shownOnMap={shownFeId === fe.id}
+                onToggleShow={() => onShowFe(shownFeId === fe.id ? null : fe)}
+                onUse={() => applyDiscovery(fe)}
+              />
+            </Card>
+          )}
         </TabPanel>
       )}
     </>

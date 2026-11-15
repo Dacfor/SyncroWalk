@@ -25,7 +25,7 @@ export type ControlView = 'pois' | 'calendar' | 'route' | 'crew';
 
 /**
  * MISSION CONTROL — prioritises the scientist's points of interest, assigns the
- * instruments for each site, plans one straight-line route per daily mission
+ * instruments for each site, plans one terrain-following route per daily mission
  * (always from the astronaut base) and sends the calendar to the astronauts.
  * Menu: "Points" (priority & instruments) · "Calendar" (daily missions, send) · "Route" (mission editor)
  * · "Crew" (simulated health & radiation status).
@@ -353,7 +353,7 @@ export default function ControlPanel({
 
           {/* Stops */}
           <div className="flex flex-col gap-2">
-            <span className="mh-label !text-base">Stops (straight segments from the base)</span>
+            <span className="mh-label !text-base">Stops (the route follows the terrain from the base)</span>
             <ol className="m-0 p-0 list-none flex flex-col gap-2">
               <li className="mh-tile !flex-row items-center !gap-3">
                 <span aria-hidden="true">⌂</span>
@@ -445,7 +445,7 @@ export default function ControlPanel({
             <Stat tile label="Return" value={`${plan.returnTime} LST`} />
           </div>
           <p className="m-0 text-base text-mh-text2">
-            Walking speed {WALK_SPEED_KMH} km/h (demo parameter). Latest return {LATEST_RETURN} LST.
+            Distances follow the terrain. Walking speed {WALK_SPEED_KMH} km/h (demo parameter). Latest return {LATEST_RETURN} LST.
           </p>
           {plan.lateReturn && (
             <div className="mh-alert !bg-mh-crit-bg !text-mh-crit" role="alert">

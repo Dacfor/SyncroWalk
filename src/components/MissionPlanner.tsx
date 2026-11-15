@@ -45,8 +45,9 @@ import { usePlannerStore } from './planner/usePlannerStore.ts';
 import ScientistPanel from './planner/ScientistPanel.tsx';
 import ControlPanel from './planner/ControlPanel.tsx';
 import AstronautPanel from './planner/AstronautPanel.tsx';
+import { DiscoveryDetail, DiscoveryList } from './planner/Discoveries.tsx';
 import UserMenu from './planner/UserMenu.tsx';
-import { BASE, FIELD_EVENT_META, PRIORITY_META, TODAY_SOL, planMission } from './planner/model.ts';
+import { BASE, FIELD_EVENT_META, PRIORITY_META, TODAY_SOL, instrumentName, planMission } from './planner/model.ts';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // §1 REAL JEZERO CRATER CONFIGURATION (FROM index_2.html & map_2.py)
@@ -196,6 +197,81 @@ const FALLBACK_M20_WAYPOINTS = [
 
 // THEMIS night IR colormap (cold → warm), shared by the SVG filter and the legend
 const THERMAL_RDBU_STOPS = ['#2166ac', '#67a9cf', '#f7f7f7', '#ef8a62', '#b2182b'];
+
+// POI flag colours by priority (fixed hex: must stay legible over Mars imagery)
+const POI_FLAG_COLORS = {
+  HIGH: '#E5484D',
+  MED: '#F5A524',
+  LOW: '#5B82C9',
+  NONE: '#8E8E93' // not prioritised yet by mission control
+};
+const flagColor = (poi) => POI_FLAG_COLORS[poi.priority ?? 'NONE'];
+
+const escapeHtml = (value) =>
+  String(value ?? '').replace(
+    /[&<>"']/g,
+    (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]
+  );
+
+// Flag marker: pole anchored on the coordinates, label = stop order on the route shown
+const flagSvg = (color, label = '', size = 1) =>
+  `<svg width="${30 * size}" height="${36 * size}" viewBox="0 0 30 36" aria-hidden="true">` +
+  `<line x1="5" y1="3" x2="5" y2="34" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round"/>` +
+  `<line x1="5" y1="3" x2="5" y2="34" stroke="#1C1C1E" stroke-width="1.6" stroke-linecap="round"/>` +
+  `<path d="M6 3.5 H27 L21.5 10.5 L27 17.5 H6 Z" fill="${color}" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/>` +
+  (label
+    ? `<text x="14.5" y="14" text-anchor="middle" font-size="9.5" font-weight="700" fill="#ffffff" font-family="DM Mono, ui-monospace, monospace">${escapeHtml(label)}</text>`
+    : '') +
+  `</svg>`;
+
+// Orbital context for a scientist-defined POI, inferred from the CRISM prior zones drawn on the map
+const inferOrbitalContext = (lat, lon) => {
+  if (lat >= 18.4415 && lat <= 18.4535 && lon >= 77.4455 && lon <= 77.4605) {
+    return { mineral: 'MRO/CRISM: Fe/Mg Smectite Clay prior zone (Delta Front, 18 m/px)', hydrationEst: '4.2 wt% H2O', uncertainty: '±32%' };
+  }
+  if (lat >= 18.4235 && lat <= 18.4365 && lon >= 77.4535 && lon <= 77.4665) {
+    return { mineral: 'MRO/CRISM: Regional Olivine + Mg-Carbonate prior zone (Séítah, 18 m/px)', hydrationEst: '2.5 wt% H2O', uncertainty: '±36%' };
+  }
+  return { mineral: 'MRO/CRISM: No dominant prior signature (crater-floor basaltic regolith)', hydrationEst: '~2.0 wt% H2O', uncertainty: '±40%' };
+};
+
+// Popup shown when a POI flag is clicked: what a field geologist wants to see
+const buildPoiPopupHtml = (poi, elevM, scheduledSols) => {
+  const color = flagColor(poi);
+  const priorityLabel = poi.priority ? `${PRIORITY_META[poi.priority].label} priority` : 'No priority yet';
+  const prior = poi.orbitalPrior?.mineral ? poi.orbitalPrior : inferOrbitalContext(poi.lat, poi.lon);
+  const post = poi.pdsInSituPosterior;
+  const sampled = Boolean(post?.pixl || post?.sherloc || post?.supercam);
+  const row = (k, v) => (v ? `<div class="mh-poi-popup__row"><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd></div>` : '');
+  return `
+    <div class="mh-poi-popup">
+      <div class="mh-poi-popup__head">
+        <span class="mh-poi-popup__chip" style="background:${color}">${escapeHtml(priorityLabel)}</span>
+        <span class="mh-poi-popup__id">${escapeHtml(poi.id)}</span>
+      </div>
+      <strong class="mh-poi-popup__title">${escapeHtml(poi.name)}</strong>
+      <dl>
+        ${row('Type of interest', poi.interestType)}
+        ${row('Geological unit', poi.geologicalUnit)}
+        ${row('Location', `${poi.lat.toFixed(4)}° N · ${poi.lon.toFixed(4)}° E · MOLA ${elevM} m`)}
+        ${row('Information to collect', poi.infoToCollect)}
+        ${row('Samples', poi.samplesRequired ? poi.sampleNotes || 'Required' : 'Not requested')}
+        ${row('Orbital mineralogy (prior)', `${prior.mineral} · ${prior.hydrationEst ?? ''} · σ ${prior.uncertainty}`)}
+        ${
+          sampled
+            ? row('Elemental chemistry (PIXL XRF)', post.pixl) +
+              row('Mineral phases (SHERLOC Raman)', post.sherloc) +
+              row('Texture (SuperCam)', post.supercam) +
+              row('Hydration (posterior)', `${post.hydrationPosterior} · σ ${post.uncertaintyAfter}`)
+            : row('In-situ composition', 'Not sampled yet — orbital prior only.')
+        }
+        ${row('Biosignature potential', post?.biosignatureRating)}
+        ${row('Instruments', poi.instruments.map(instrumentName).join(', '))}
+        ${row('Time on site', `${poi.durationMin} min`)}
+        ${row('Scheduled', scheduledSols.length ? `Sol ${scheduledSols.join(', ')}` : 'Not in a mission yet')}
+      </dl>
+    </div>`;
+};
 
 // One NASA Trek / ArcGIS tile layer from a catalog entry
 const createRasterLayer = (L, cfg, zIndex) =>
@@ -655,7 +731,6 @@ export default function MissionPlanner() {
 
   // 5. Interactive Funnel & UI Drawer States
   const [selectedPoiId, setSelectedPoiId] = useState(null);
-  const [poiLabelId, setPoiLabelId] = useState(null); // POI whose description is open on the map
   const [mapReady, setMapReady] = useState(false); // Leaflet loads async: re-run the overlay sync once it exists
 
   // 6. Shared mission-planning store (POIs, daily missions) used by all three users
@@ -672,6 +747,12 @@ export default function MissionPlanner() {
   const [showJsonModal, setShowJsonModal] = useState(false);
   const [toastMsg, setToastMsg] = useState(null);
   const [shownFeId, setShownFeId] = useState(null); // field discovery shown on the main map (scientist)
+  const [selectedFeId, setSelectedFeId] = useState('FE-024-003'); // discovery selected in list / field map
+  const [showFieldMap, setShowFieldMap] = useState(false); // field discoveries window (second map)
+  const [pendingFe, setPendingFe] = useState(null); // discovery to load into the scientist "Add point" form
+  const fieldMapContainerRef = useRef(null);
+  const fieldMapRef = useRef(null);
+  const fieldMapLayerRef = useRef(null);
   const [mapExpanded, setMapExpanded] = useState(false);
 
   // Mission Hub theme: 'auto' follows the device, 'light' / 'dark' force it
@@ -748,6 +829,7 @@ export default function MissionPlanner() {
     if (preset) {
       setActiveFilters({ ...preset.filters });
     }
+    mapInstanceRef.current?.closePopup(); // a POI popup belongs to the previous user's view
     if (nextRole !== 'scientist') {
       setPickMode(false);
       setDraftPoint(null);
@@ -1174,7 +1256,7 @@ export default function MissionPlanner() {
       L.polyline(latlngs, { color: '#ffffff', weight: 9, opacity: 0.85 }).addTo(routeGroup);
       L.polyline(latlngs, { color: '#2F6BD8', weight: 5, opacity: 1, dashArray: '12, 8' })
         .bindTooltip(
-          `Sol ${mapMission.sol} EVA · ${mapPlan.totalKm.toFixed(2)} km · back at base ${mapPlan.returnTime}`,
+          `Sol ${mapMission.sol} EVA · ${mapPlan.totalKm.toFixed(2)} km along the terrain · back at base ${mapPlan.returnTime}`,
           { sticky: true }
         )
         .addTo(routeGroup);
@@ -1221,8 +1303,9 @@ export default function MissionPlanner() {
       L.marker([fe.lat, fe.lon], { icon }).bindTooltip(fe.title, { direction: 'top' }).addTo(feGroup);
     });
 
-    // 7. Points of interest. Scientist & control see all of them; the astronaut only
-    //    sees the stops of the selected day. Numbers follow the route order.
+    // 7. Points of interest as flags coloured by priority (click → geology & mission popup).
+    //    Scientist & control see all of them; the astronaut only the stops of the selected day.
+    //    The number on the flag is the stop order of the route shown.
     const poiGroup = vectorGroupsRef.current.pois;
     poiGroup.clearLayers();
     const stopOrder = new Map((mapPlan?.stops ?? []).map((poi, i) => [poi.id, i + 1]));
@@ -1230,37 +1313,17 @@ export default function MissionPlanner() {
 
     visiblePois.forEach((poi) => {
       const order = stopOrder.get(poi.id);
-      const color = poi.priority ? PRIORITY_META[poi.priority].color : 'var(--mh-text2)';
-      const sub = poi.priority ? `${PRIORITY_META[poi.priority].label} priority` : 'No priority yet';
       const isSelected = selectedPoiId === poi.id;
-      const labelOpen = poiLabelId === poi.id;
-      const ring = isSelected ? 'var(--mh-primary)' : '#ffffff';
-      const dot = `<span style="width:26px;height:26px;border-radius:50%;background:${color};color:var(--mh-card);font-family:var(--mh-font-mono);font-weight:500;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${order ?? '•'}</span>`;
-      // Collapsed: just the numbered dot. Clicking it opens the short description.
-      const html = labelOpen
-        ? `<div style="display:flex;align-items:center;gap:8px;background:var(--mh-card);border:2px solid ${ring === '#ffffff' ? color : ring};padding:2px 12px 2px 2px;border-radius:999px;box-shadow:0 3px 12px rgba(0,0,0,0.35);white-space:nowrap;cursor:pointer;">
-            ${dot}
-            <div>
-              <div style="color:var(--mh-text);font-family:var(--mh-font);font-weight:700;font-size:13px;line-height:1.2;">${poi.id} · ${poi.name.split('(')[0].trim()}</div>
-              <div style="color:var(--mh-text2);font-family:var(--mh-font);font-size:12px;">${sub} · ${poi.interestType}</div>
-            </div>
-          </div>`
-        : `<div style="display:inline-flex;border:2px solid ${ring};border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.45);cursor:pointer;">${dot}</div>`;
       const icon = L.divIcon({
         className: '',
-        html,
-        iconSize: labelOpen ? [240, 34] : [30, 30],
-        iconAnchor: [15, 15] // dot centre stays on the coordinates in both states
+        html: `<div class="mh-poi-flag${isSelected ? ' is-selected' : ''}">${flagSvg(flagColor(poi), order ? String(order) : '')}</div>`,
+        iconSize: [30, 36],
+        iconAnchor: [5, 34], // foot of the pole on the coordinates
+        tooltipAnchor: [12, -24]
       });
-      L.marker([poi.lat, poi.lon], {
-        icon,
-        zIndexOffset: labelOpen ? 900 : isSelected ? 800 : 500,
-        title: `${poi.id} — click for details`
-      })
-        .on('click', () => {
-          setPoiLabelId((cur) => (cur === poi.id ? null : poi.id));
-          setSelectedPoiId(poi.id);
-        })
+      L.marker([poi.lat, poi.lon], { icon, zIndexOffset: isSelected ? 1000 : 500 })
+        .bindTooltip(`${poi.id} · ${poi.name.split('(')[0].trim()}`, { direction: 'right' })
+        .on('click', () => openPoiPopup(poi))
         .addTo(poiGroup);
     });
 
@@ -1276,7 +1339,105 @@ export default function MissionPlanner() {
         .bindTooltip('New point of interest', { permanent: true, direction: 'top', className: 'syncrowalk-tooltip' })
         .addTo(poiGroup);
     }
-  }, [activeFilters, currentRole, mission, rasterOpacities, selectedPoiId, poiLabelId, planner.state, selectedMissionId, astronautSol, draftPoint, mapReady, shownFeId]);
+  }, [activeFilters, currentRole, mission, rasterOpacities, selectedPoiId, planner.state, selectedMissionId, astronautSol, draftPoint, mapReady, shownFeId]);
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // FIELD DISCOVERIES MAP (Scientist): a second, independent Leaflet map that lives
+  // only while its window is open. The main persistent map is never touched.
+  // ═══════════════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    const L = window.L;
+    const el = fieldMapContainerRef.current;
+    if (!showFieldMap || !L || !el) return;
+
+    const fmap = L.map(el, { crs: L.CRS.EPSG4326, minZoom: 10, maxZoom: 18, attributionControl: false });
+    ['viking', 'ctxGlobal', 'ctxJez', 'hiriseJez'].forEach((id, idx) => {
+      const cfg = JEZERO_RASTER_CATALOG.find((c) => c.id === id);
+      if (cfg) createRasterLayer(L, cfg, 10 + idx).addTo(fmap);
+    });
+    L.control.scale({ metric: true, imperial: false, position: 'bottomleft' }).addTo(fmap);
+    fieldMapLayerRef.current = L.layerGroup().addTo(fmap);
+    const fitAll = () =>
+      fmap.fitBounds(
+        [...mission.fieldEvents.map((fe) => [fe.lat, fe.lon]), [BASE.lat, BASE.lon]],
+        { padding: [70, 70], maxZoom: 16 }
+      );
+    fitAll();
+    fieldMapRef.current = fmap;
+
+    // The dialog reaches its final size after the first layout: re-fit once at that point
+    let firstResize = true;
+    const ro =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(() => {
+            fmap.invalidateSize();
+            if (firstResize) {
+              firstResize = false;
+              fitAll();
+            }
+          })
+        : null;
+    ro?.observe(el);
+    const onKey = (e) => e.key === 'Escape' && setShowFieldMap(false);
+    window.addEventListener('keydown', onKey);
+
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      ro?.disconnect();
+      fmap.remove();
+      fieldMapRef.current = null;
+      fieldMapLayerRef.current = null;
+    };
+  }, [showFieldMap]);
+
+  useEffect(() => {
+    const L = window.L;
+    const group = fieldMapLayerRef.current;
+    if (!showFieldMap || !L || !group) return;
+    group.clearLayers();
+
+    // Context: base + existing POI flags (faded, not clickable here)
+    L.marker([BASE.lat, BASE.lon], {
+      interactive: false,
+      icon: L.divIcon({
+        className: '',
+        html: `<div style="width:34px;height:34px;border-radius:50%;background:var(--mh-primary);border:3px solid #fff;display:flex;align-items:center;justify-content:center;opacity:0.8"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>`,
+        iconSize: [34, 34],
+        iconAnchor: [17, 17]
+      })
+    }).addTo(group);
+    planner.state.pois.forEach((poi) => {
+      L.marker([poi.lat, poi.lon], {
+        interactive: false,
+        icon: L.divIcon({
+          className: '',
+          html: `<div class="mh-poi-flag" style="opacity:0.55">${flagSvg(flagColor(poi))}</div>`,
+          iconSize: [30, 36],
+          iconAnchor: [5, 34]
+        })
+      }).addTo(group);
+    });
+
+    mission.fieldEvents.forEach((fe) => {
+      const isSel = fe.id === selectedFeId;
+      const color = (FIELD_EVENT_META[fe.class] ?? FIELD_EVENT_META['formation-interest']).color;
+      L.marker([fe.lat, fe.lon], {
+        zIndexOffset: isSel ? 1000 : 100,
+        keyboard: true,
+        title: fe.title,
+        icon: L.divIcon({
+          className: '',
+          html: `<div class="mh-fe-marker${isSel ? ' is-selected' : ''}" style="--fe-color:${color}"><span aria-hidden="true">◆</span>${escapeHtml(fe.id)}</div>`,
+          iconSize: null
+        })
+      })
+        .on('click', () => {
+          setSelectedFeId(fe.id);
+          fieldMapRef.current?.panTo([fe.lat, fe.lon], { animate: true });
+        })
+        .addTo(group);
+    });
+  }, [showFieldMap, mission.fieldEvents, planner.state.pois, selectedFeId]);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // ROLE-SPECIFIC MAP ACTIONS
@@ -1284,7 +1445,6 @@ export default function MissionPlanner() {
   // The Leaflet click listener is registered once, so it calls whatever this ref holds
   useEffect(() => {
     mapClickRef.current = (lat, lon) => {
-      setPoiLabelId(null);
       if (currentRole === 'scientist' && pickMode) {
         setDraftPoint({ lat, lon });
         setPickMode(false);
@@ -1313,6 +1473,35 @@ export default function MissionPlanner() {
     });
     // Only re-frame when the user picks another mission/day, not on every edit
   }, [currentRole, selectedMissionId, astronautSol, mapReady]);
+
+  const showFeOnMainMap = (fe) => {
+    setShownFeId(fe ? fe.id : null);
+    if (fe) mapInstanceRef.current?.panTo([fe.lat, fe.lon], { animate: true });
+  };
+
+  const openPoiPopup = (poi) => {
+    setSelectedPoiId(poi.id);
+    const map = mapInstanceRef.current;
+    const L = window.L;
+    if (!map || !L) return;
+    const sols = planner.state.missions
+      .filter((m) => m.poiIds.includes(poi.id))
+      .map((m) => m.sol)
+      .sort((a, b) => a - b);
+    L.popup({
+      className: 'mh-leaflet-popup',
+      maxWidth: 340,
+      minWidth: 260,
+      maxHeight: 380,
+      offset: [10, -30],
+      // keep the popup clear of the legend (top-left) and the map buttons (top-right)
+      autoPanPaddingTopLeft: [window.innerWidth >= 640 ? 300 : 24, 24],
+      autoPanPaddingBottomRight: [72, 24]
+    })
+      .setLatLng([poi.lat, poi.lon])
+      .setContent(buildPoiPopupHtml(poi, estimateJezeroMolaElevation(poi.lat, poi.lon), sols))
+      .openOn(map);
+  };
 
   const focusPoi = (poi) => {
     setSelectedPoiId(poi.id);
@@ -1428,11 +1617,11 @@ export default function MissionPlanner() {
       {/* ═══════════════════════════════════════════════════════════════════════
           WORKSPACE: FULL-HEIGHT JEZERO MAP (LEFT, OR FULL WIDTH) + SCROLLING ROLE PANEL (RIGHT)
          ═══════════════════════════════════════════════════════════════════════ */}
-      <main className="w-full flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_440px] xl:grid-cols-[minmax(0,1fr)_480px] 2xl:grid-cols-[minmax(0,1fr)_540px] gap-4 sm:gap-5 pl-4 pr-4 sm:pr-6 lg:pl-0 py-4">
+      <main className="w-full flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_440px] xl:grid-cols-[minmax(0,1fr)_480px] 2xl:grid-cols-[minmax(0,1fr)_540px] gap-4 sm:gap-5 px-4 sm:px-6 py-4">
         {/* LEFT: PERSISTENT LEAFLET MAP CARD */}
         <section
           ref={mapSectionRef}
-          className={`flex flex-col bg-mh-card rounded-mh-lg lg:rounded-l-none shadow-mh overflow-hidden scroll-mt-6 lg:h-full lg:min-h-0 ${
+          className={`flex flex-col bg-mh-card rounded-mh-lg shadow-mh overflow-hidden scroll-mt-6 lg:h-full lg:min-h-0 ${
             mapExpanded ? 'lg:col-span-2' : ''
           }`}
           aria-label="Jezero map"
@@ -1471,6 +1660,18 @@ export default function MissionPlanner() {
             >
               Perseverance traverse (PDS)
             </FilterToggle>
+            {currentRole === 'scientist' && (
+              <button
+                type="button"
+                onClick={() => setShowFieldMap(true)}
+                className="mh-btn mh-btn--plain !min-h-11 !px-4 !text-[15px] ml-auto"
+                title="Open the in-situ field discoveries (FE-…) on their own map"
+              >
+                <MapPin className="w-4 h-4" aria-hidden="true" />
+                <span>Field discoveries</span>
+                <span className="mh-pill mh-pill--info !py-0">{mission.fieldEvents.length}</span>
+              </button>
+            )}
           </div>
 
           {/* Map */}
@@ -1628,10 +1829,12 @@ export default function MissionPlanner() {
               setView={setRoleView('scientist')}
               fieldEvents={mission.fieldEvents}
               shownFeId={shownFeId}
-              onShowFe={(fe) => {
-                setShownFeId(fe ? fe.id : null);
-                if (fe) mapInstanceRef.current?.panTo([fe.lat, fe.lon], { animate: true });
-              }}
+              onShowFe={showFeOnMainMap}
+              selectedFeId={selectedFeId}
+              setSelectedFeId={setSelectedFeId}
+              onOpenFieldMap={() => setShowFieldMap(true)}
+              pendingFe={pendingFe}
+              clearPendingFe={() => setPendingFe(null)}
             />
           )}
           {currentRole === 'control' && (
@@ -1659,6 +1862,80 @@ export default function MissionPlanner() {
           )}
         </aside>
       </main>
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+          FIELD DISCOVERIES WINDOW (Scientist): second map + list + detail
+         ═══════════════════════════════════════════════════════════════════════ */}
+      {showFieldMap && (() => {
+        const fe = mission.fieldEvents.find((f) => f.id === selectedFeId) || mission.fieldEvents[0];
+        const linked = (id) => planner.state.pois.find((p) => p.fromFieldEventId === id)?.id;
+        return (
+          <div
+            className="fixed inset-0 z-[1200] bg-black/50 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6"
+            onClick={() => setShowFieldMap(false)}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="field-map-title"
+              onClick={(e) => e.stopPropagation()}
+              className="bg-mh-card rounded-mh-lg shadow-mh w-full max-w-[1400px] h-[92vh] flex flex-col overflow-hidden"
+            >
+              <div className="px-5 py-4 flex items-start justify-between gap-3 border-b border-mh-sep shrink-0">
+                <div className="flex flex-col gap-1 min-w-0">
+                  <span className="mh-eyebrow mh-eyebrow--line">Field discoveries</span>
+                  <h2 id="field-map-title" className="m-0 text-[22px] leading-tight font-bold">
+                    In-situ discoveries map
+                  </h2>
+                  <p className="m-0 text-base text-mh-text2">
+                    Kept off the main map. Select a discovery to review it, show it on the main map or use it as a point
+                    of interest.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowFieldMap(false)}
+                  className="mh-btn mh-btn--icon bg-mh-fill text-mh-text shrink-0"
+                  aria-label="Close"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="flex-1 min-h-0 grid grid-cols-1 grid-rows-[minmax(260px,45%)_1fr] lg:grid-rows-1 lg:grid-cols-[minmax(0,1fr)_420px]">
+                <div ref={fieldMapContainerRef} className="w-full h-full min-h-0 z-10" />
+                <div className="min-h-0 overflow-y-auto p-5 flex flex-col gap-4 border-t lg:border-t-0 lg:border-l border-mh-sep">
+                  <DiscoveryList
+                    fieldEvents={mission.fieldEvents}
+                    selectedId={fe.id}
+                    onSelect={(item) => {
+                      setSelectedFeId(item.id);
+                      fieldMapRef.current?.panTo([item.lat, item.lon], { animate: true });
+                    }}
+                    linkedPoiId={linked}
+                  />
+                  <h3 className="m-0 text-[20px] leading-tight font-bold">{fe.title}</h3>
+                  <DiscoveryDetail
+                    fe={fe}
+                    linkedPoiId={linked(fe.id)}
+                    elevM={estimateJezeroMolaElevation(fe.lat, fe.lon)}
+                    shownOnMap={shownFeId === fe.id}
+                    onToggleShow={() => {
+                      const showing = shownFeId === fe.id;
+                      showFeOnMainMap(showing ? null : fe);
+                      if (!showing) setShowFieldMap(false);
+                    }}
+                    onUse={() => {
+                      setPendingFe(fe);
+                      setRoleViews((prev) => ({ ...prev, scientist: 'define' }));
+                      setShowFieldMap(false);
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ═══════════════════════════════════════════════════════════════════════
           EVIDENCE & PDS SOURCES SLIDE-OVER DRAWER
@@ -1882,20 +2159,24 @@ function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe
       {open && (
         <div className="px-3 pb-3 flex flex-col gap-3 overflow-y-auto text-[14px] leading-snug">
           <LegendSection title="Points of interest">
-            {Object.entries(PRIORITY_META).map(([k, m]) => (
-              <LegendRow key={k} swatch={<DotSwatch color={m.color} />}>
-                {m.label} priority
+            {[
+              ['HIGH', 'High priority'],
+              ['MED', 'Medium priority'],
+              ['LOW', 'Low priority'],
+              ['NONE', 'No priority yet']
+            ].map(([k, label]) => (
+              <LegendRow key={k} swatch={<span dangerouslySetInnerHTML={{ __html: flagSvg(POI_FLAG_COLORS[k], '', 0.55) }} />}>
+                {label}
               </LegendRow>
             ))}
-            <LegendRow swatch={<DotSwatch color="var(--mh-text2)" />}>No priority yet</LegendRow>
-            <li className="text-mh-text2">Number = stop order · click a point for details</li>
+            <li className="text-mh-text2">Number = stop order · click a flag for geology</li>
           </LegendSection>
 
           <LegendSection title="Base & route">
             <LegendRow swatch={<DotSwatch color="var(--mh-primary)" size={18} />}>Astronaut base</LegendRow>
             {routeVisible && (
               <LegendRow swatch={<LineSwatch color="#2F6BD8" dash="5 3" width={3} casing />}>
-                Daily EVA route (base → stops → base)
+                Daily EVA route, following the terrain
               </LegendRow>
             )}
           </LegendSection>
