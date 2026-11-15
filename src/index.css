@@ -229,3 +229,9 @@ body,
 input[type='range'] {
   accent-color: var(--mh-primary);
 }
+
+/* Scientist "pick on map" mode */
+.pick-mode .leaflet-container,
+.pick-mode .leaflet-interactive {
+  cursor: crosshair !important;
+}
