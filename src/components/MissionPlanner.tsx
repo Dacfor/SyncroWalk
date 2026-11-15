@@ -48,7 +48,7 @@ import AstronautPanel from './planner/AstronautPanel.tsx';
 import { DiscoveryDetail, DiscoveryList } from './planner/Discoveries.tsx';
 import UserMenu from './planner/UserMenu.tsx';
 import { COMPOSITION_LAYERS, CompositionMenu, compositionLayer } from './planner/LayerMenus.tsx';
-import { BASE, CREW_ROSTER, FIELD_EVENT_META, PRIORITY_META, TODAY_SOL, instrumentName, planFor } from './planner/model.ts';
+import { BASE, FIELD_EVENT_META, PRIORITY_META, SEAT_LABEL, TODAY_SOL, crewAssignment, instrumentName, isHazard, planFor } from './planner/model.ts';
 import {
   DEMO_ASSUMPTIONS,
   MISSION_OBJECTIVE,
@@ -1432,7 +1432,7 @@ export default function MissionPlanner() {
     feGroup.clearLayers();
     const visibleFieldEvents =
       currentRole === 'control'
-        ? (activeFilters.hazards ? planner.state.fieldEvents : [])
+        ? (activeFilters.hazards ? planner.state.fieldEvents.filter(isHazard) : []) // operational hazards only
         : currentRole === 'scientist'
           ? planner.state.fieldEvents.filter((fe) => fe.id === shownFeId)
           : [];
@@ -1964,7 +1964,7 @@ export default function MissionPlanner() {
               activeFilters={activeFilters}
               routeVisible={mapRouteVisible}
               showDraft={currentRole === 'scientist' && !!draftPoint}
-              showFe={(currentRole === 'control' && activeFilters.hazards && planner.state.fieldEvents.length > 0) || (currentRole === 'scientist' && !!shownFeId)}
+              showFe={(currentRole === 'control' && activeFilters.hazards && planner.state.fieldEvents.some(isHazard)) || (currentRole === 'scientist' && !!shownFeId)}
             />
 
             {pickMode && (
@@ -2134,8 +2134,10 @@ export default function MissionPlanner() {
           const A = DEMO_ASSUMPTIONS;
           const plan = planFor(planner.state, briefingMission);
           const m = plan.metrics;
-          const evCrew = CREW_ROSTER.filter((c) => c.evaCrew);
-          const iv = CREW_ROSTER.find((c) => !c.evaCrew);
+          const seated = crewAssignment(planner.state.crew, briefingMission);
+          const evCrew = seated.filter((c) => c.seatNow.startsWith('EV'));
+          const ivCrew = seated.filter((c) => c.seatNow.startsWith('IV'));
+          const iv = ivCrew[0];
           const poiStops = m.stops.filter((st) => st.kind === 'poi');
           const lastPoi = poiStops[poiStops.length - 1];
           const turnBackLst = lastPoi
@@ -2200,14 +2202,14 @@ export default function MissionPlanner() {
                       <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">Team</span>
                       {evCrew.map((c) => (
                         <span key={c.id} className="text-base">
-                          <strong>{c.id}</strong> · {c.name}
+                          <strong>{c.seatNow}</strong> · {c.name}
                         </span>
                       ))}
-                      {iv && (
-                        <span className="text-base">
-                          <strong>IV</strong> · {iv.name} (in base)
+                      {ivCrew.map((c) => (
+                        <span key={c.id} className="text-base">
+                          <strong>{c.seatNow}</strong> · {c.name} ({SEAT_LABEL[c.seatNow].toLowerCase()})
                         </span>
-                      )}
+                      ))}
                     </div>
                   </div>
 
@@ -2770,11 +2772,13 @@ function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe
 
           <LegendSection title="Markers">
             {showFe &&
-              Object.values(FIELD_EVENT_META).map(({ color: c, label }) => (
-                <LegendRow key={label} swatch={<span className="font-mono text-[15px] leading-none" style={{ color: c }}>◆</span>}>
-                  {label} (field discovery)
-                </LegendRow>
-              ))}
+              Object.entries(FIELD_EVENT_META)
+                .filter(([cls]) => isSci || isHazard({ class: cls }))
+                .map(([, { color: c, label }]) => (
+                  <LegendRow key={label} swatch={<span className="font-mono text-[15px] leading-none" style={{ color: c }}>◆</span>}>
+                    {label} {isSci ? '(field discovery)' : '(field hazard)'}
+                  </LegendRow>
+                ))}
             {showDraft && (
               <LegendRow swatch={<DotSwatch color="#FC3D21" />}>New point of interest (draft)</LegendRow>
             )}

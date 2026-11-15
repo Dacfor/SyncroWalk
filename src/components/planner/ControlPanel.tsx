@@ -28,7 +28,8 @@ import {
 import { ConstraintTable, ElevationProfile, GoNoGoBanner, SimBadge } from './analysisUi.tsx';
 import { Card, Chip, Label, PanelTabs, Segmented, Stat, STATUS_META, TabPanel } from './ui.tsx';
 import {
-  CREW_ROSTER,
+  SEAT_LABEL,
+  crewAssignment,
   DAYLIGHT,
   INSTRUMENTS,
   PRIORITY_META,
@@ -98,17 +99,20 @@ export default function ControlPanel({
 
   // Crew status (simulated): EVA crew is "out" when today's mission has been sent with stops
   const todaySent = state.missions.find((m) => m.sol === TODAY_SOL && m.status !== 'draft' && m.poiIds.length > 0);
-  const crew = CREW_ROSTER.map((c) => {
+  // Seats refer to the mission being edited, otherwise to today's mission
+  const seatMission = mission ?? state.missions.find((m) => m.sol === TODAY_SOL) ?? null;
+  const crew = crewAssignment(state.crew, seatMission).map((c) => {
+    const evaCrew = c.seatNow === 'EV1' || c.seatNow === 'EV2';
     const doseDeltaMsv = c.doseActualMsv - c.dosePlannedMsv;
     const doseDeltaPct = Math.round((c.doseActualMsv / c.dosePlannedMsv - 1) * 100);
     const health =
-      state.sepAlert && c.evaCrew && todaySent
+      state.sepAlert && evaCrew && todaySent
         ? { label: 'Medical review', cls: 'mh-pill--crit' }
         : c.fatigue !== 'Low' || doseDeltaMsv > 0
           ? { label: 'Monitor', cls: 'mh-pill--warn' }
           : { label: 'Nominal', cls: 'mh-pill--ok' };
     const remainingEvas = remainingEvasByDose(c.doseActualMsv, TODAY_SOL);
-    return { ...c, doseDeltaMsv, doseDeltaPct, health, remainingEvas, onEvaToday: c.evaCrew && !!todaySent };
+    return { ...c, evaCrew, doseDeltaMsv, doseDeltaPct, health, remainingEvas, onEvaToday: evaCrew && !!todaySent && seatMission?.sol === TODAY_SOL };
   });
   // Environment refers to the mission being edited, or today's
   const envMission = mission ?? state.missions.find((m) => m.sol === TODAY_SOL) ?? null;
@@ -433,6 +437,48 @@ export default function ControlPanel({
             </div>
           )}
 
+          {/* EVA pair: can change from sol to sol */}
+          <div className="flex flex-col gap-2">
+            <span className="mh-label !text-base">EVA pair for Sol {mission.sol}</span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {(['EV1', 'EV2'] as const).map((seat, i) => {
+                const pair = crew.filter((c) => c.evaCrew).map((c) => c.id) as [string, string];
+                return (
+                  <div key={seat}>
+                    <Label htmlFor={`m-${seat}`}>
+                      {seat} · {SEAT_LABEL[seat]}
+                    </Label>
+                    <select
+                      id={`m-${seat}`}
+                      className="mh-input"
+                      value={pair[i]}
+                      onChange={(e) => {
+                        const next = [...pair] as [string, string];
+                        // Picking the other EV swaps the two seats
+                        if (next[1 - i] === e.target.value) next[1 - i] = pair[i];
+                        next[i] = e.target.value;
+                        store.updateMission(mission.id, { evaPair: next });
+                      }}
+                    >
+                      {crew.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} · {c.remainingEvas} EVA{c.remainingEvas === 1 ? '' : 's'} left (dose)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="m-0 text-base text-mh-text2">
+              In the habitat:{' '}
+              {crew
+                .filter((c) => !c.evaCrew)
+                .map((c) => `${c.seatNow} ${c.name} (${SEAT_LABEL[c.seatNow].toLowerCase()})`)
+                .join(' · ')}
+            </p>
+          </div>
+
           {/* Stops */}
           <div className="flex flex-col gap-2">
             <span className="mh-label !text-base">Stops (the route follows the terrain from the base)</span>
@@ -688,7 +734,7 @@ export default function ControlPanel({
                     <Stat
                       key={c.id}
                       tile
-                      label={`${c.id} · EVA dose → new total`}
+                      label={`${c.seatNow} ${c.name.split(' ').slice(-1)[0]} · EVA dose → new total`}
                       value={`${m.doseEvaMsv.toFixed(2)} mSv → ${(c.doseActualMsv + m.doseEvaMsv).toFixed(2)} / ${A.crewSurfaceDoseBudgetMsv} mSv`}
                     />
                   ))}
@@ -716,7 +762,8 @@ export default function ControlPanel({
         <TabPanel id="crew">
           <Card
             eyebrow="Crew health & radiation"
-            title="Astronauts status"
+            title="Crew status"
+            subtitle={seatMission ? `Seats for the Sol ${seatMission.sol} mission: two on EVA, two in the habitat.` : undefined}
             icon={Users}
             aside={<span className="mh-pill mh-pill--warn">Simulated telemetry</span>}
           >
@@ -729,10 +776,10 @@ export default function ControlPanel({
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <span className="flex flex-col min-w-0">
                         <strong className="text-base">
-                          {c.id} · {c.name}
+                          {c.seatNow} · {c.name}
                         </strong>
                         <span className="text-base text-mh-text2">
-                          {c.role}
+                          {SEAT_LABEL[c.seatNow]} · {c.role}
                           {c.onEvaToday ? ` · on today’s EVA (Sol ${TODAY_SOL})` : ''}
                         </span>
                       </span>
@@ -754,7 +801,7 @@ export default function ControlPanel({
                         aria-valuemin={0}
                         aria-valuemax={c.dosePlannedMsv}
                         aria-valuenow={c.doseActualMsv}
-                        aria-label={`${c.id} measured dose versus planned`}
+                        aria-label={`${c.name} measured dose versus planned`}
                       >
                         <span style={{ width: `${fillPct}%`, background: over ? 'var(--mh-crit)' : 'var(--mh-ok)' }} />
                       </div>

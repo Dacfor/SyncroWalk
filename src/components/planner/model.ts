@@ -46,6 +46,8 @@ export interface DailyMission {
   poiIds: string[]; // ordered stops; the route always starts and ends at the base
   extraEquipment: string[];
   status: MissionStatus;
+  /** Crew ids of the two astronauts going out [EV1, EV2]; default = the roster seats */
+  evaPair?: [string, string];
 }
 
 export interface PlannerState {
@@ -55,6 +57,7 @@ export interface PlannerState {
   fieldEvents: FieldEvent[]; // in-situ discoveries & anomaly reports (crew → scientist & route model)
   measured: string[]; // POI ids measured in the field by the astronauts
   sepAlert: boolean; // scripted SEP / DONKI alert (demo switch in Mission Control)
+  crew: CrewMember[]; // crew status (simulated telemetry); dose is updated by the EVA debriefs
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -102,6 +105,11 @@ export const PRIORITY_META: Record<Priority, { label: string; cls: string; color
 };
 
 // Field discoveries (FE-…) logged during EVAs: colour, label and suggested interest type per class
+// Field-event classes that are operational hazards (the only ones Mission Control sees);
+// science discoveries stay with the Scientist until they are turned into a POI.
+export const HAZARD_CLASSES = ['boulder', 'soft-soil'];
+export const isHazard = (fe: { class: string }) => HAZARD_CLASSES.includes(fe.class);
+
 export const FIELD_EVENT_META: Record<string, { color: string; label: string; interestType: string }> = {
   'formation-interest': { color: '#38bdf8', label: 'Formation of interest', interestType: 'Geology' },
   boulder: { color: '#E5484D', label: 'Boulder hazard', interestType: 'Hazard survey' },
@@ -403,6 +411,7 @@ export const SEED_STATE: PlannerState = {
   packed: {},
   measured: [],
   sepAlert: false,
+  crew: [], // filled below with CREW_ROSTER (declared after the seed)
   // Candidate field events & rapid in-situ discoveries (Sol 24)
   fieldEvents: [
     {
@@ -455,12 +464,16 @@ export const SEED_STATE: PlannerState = {
 };
 
 // ── Crew status (simulated telemetry, demo data — not real) ──────────────────
-// Surface dose = cumulative since landing, planned vs measured by suit dosimeter.
+// Crew of four: two go out (EV1, EV2), two stay in the habitat (IV1 comms / habitat,
+// IV2 science & medical support). `seat` is the default assignment; each daily mission can
+// name its own EVA pair (`evaPair`), so the pair can rotate from sol to sol.
+// Surface dose = cumulative since landing, planned vs measured by the personal dosimeter.
+export type CrewSeat = 'EV1' | 'EV2' | 'IV1' | 'IV2';
 export interface CrewMember {
   id: string;
   name: string;
-  role: string;
-  evaCrew: boolean; // goes out on the daily EVA
+  role: string; // specialty
+  seat: CrewSeat; // default seat
   evasCompleted: number;
   dosePlannedMsv: number;
   doseActualMsv: number;
@@ -469,12 +482,19 @@ export interface CrewMember {
   psych: string;
 }
 
+export const SEAT_LABEL: Record<CrewSeat, string> = {
+  EV1: 'EVA lead',
+  EV2: 'EVA',
+  IV1: 'Comms & habitat',
+  IV2: 'Science & medical support'
+};
+
 export const CREW_ROSTER: CrewMember[] = [
   {
-    id: 'EV1',
+    id: 'CM1',
     name: 'Cmdr. Lena Okafor',
-    role: 'EVA lead · Field geology',
-    evaCrew: true,
+    role: 'Field geology',
+    seat: 'EV1',
     evasCompleted: 7,
     dosePlannedMsv: 15.4,
     doseActualMsv: 14.9,
@@ -483,10 +503,10 @@ export const CREW_ROSTER: CrewMember[] = [
     psych: 'Nominal (Sol 23 check-in)'
   },
   {
-    id: 'EV2',
+    id: 'CM2',
     name: 'Dr. Samir Haddad',
-    role: 'EVA · Astrobiology & sampling',
-    evaCrew: true,
+    role: 'Astrobiology & sampling',
+    seat: 'EV2',
     evasCompleted: 6,
     dosePlannedMsv: 15.4,
     doseActualMsv: 15.6,
@@ -495,15 +515,45 @@ export const CREW_ROSTER: CrewMember[] = [
     psych: 'Nominal · reports short sleep'
   },
   {
-    id: 'IV',
+    id: 'CM3',
     name: 'Eng. Rui Tanaka',
-    role: 'IV operator · Base & comms',
-    evaCrew: false,
+    role: 'Systems & comms',
+    seat: 'IV1',
     evasCompleted: 3,
-    dosePlannedMsv: 12.6,
-    doseActualMsv: 12.2,
+    dosePlannedMsv: 15.4,
+    doseActualMsv: 14.6,
     vitals: { heartRate: 72, spo2: 98, sleepH: 7.6 },
     fatigue: 'Low',
     psych: 'Nominal'
+  },
+  {
+    id: 'CM4',
+    name: 'Dr. Maya Lindqvist',
+    role: 'Flight surgeon & geochemistry',
+    seat: 'IV2',
+    evasCompleted: 4,
+    dosePlannedMsv: 15.4,
+    doseActualMsv: 14.7,
+    vitals: { heartRate: 69, spo2: 98, sleepH: 7.3 },
+    fatigue: 'Low',
+    psych: 'Nominal (Sol 23 check-in)'
   }
 ];
+
+export interface SeatedCrew extends CrewMember {
+  seatNow: CrewSeat;
+}
+
+/** Who sits where for a mission: its EVA pair goes out, the other two stay in the habitat. */
+export const crewAssignment = (crew: CrewMember[], mission?: Pick<DailyMission, 'evaPair'> | null): SeatedCrew[] => {
+  const bySeat = (seat: CrewSeat) => crew.find((c) => c.seat === seat);
+  const pairIds = mission?.evaPair ?? [bySeat('EV1')?.id, bySeat('EV2')?.id];
+  const pair = pairIds.map((id) => crew.find((c) => c.id === id)).filter((c): c is CrewMember => Boolean(c));
+  const inside = crew.filter((c) => !pair.includes(c));
+  return [
+    ...pair.map((c, i) => ({ ...c, seatNow: (i === 0 ? 'EV1' : 'EV2') as CrewSeat })),
+    ...inside.map((c, i) => ({ ...c, seatNow: (i === 0 ? 'IV1' : 'IV2') as CrewSeat }))
+  ];
+};
+
+SEED_STATE.crew = CREW_ROSTER;
