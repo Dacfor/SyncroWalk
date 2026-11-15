@@ -2,7 +2,7 @@
   "name": "syncrowalk",
   "version": "0.0.0",
   "private": true,
-  "description": "This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.",
+  "description": "SyncroWalk: role-based EVA mission planning on a shared map of Jezero Crater, Mars (NASA Space Apps Challenge).",
   "homepage": "https://github.com/Dacfor/SyncroWalk#readme",
   "bugs": {
     "url": "https://github.com/Dacfor/SyncroWalk/issues"

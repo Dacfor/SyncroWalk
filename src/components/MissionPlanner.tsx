@@ -79,9 +79,6 @@ const JEZ_CTX_BOUNDS = [
   [18.7211945, 77.6991776]
 ];
 
-const MOLA_COG_URL =
-  'https://asc-pds-services.s3.us-west-2.amazonaws.com/wms_basemaps3/Mars/MOLA/mola128_mola64_merge_90Nto90S_SimpleC_clon0_cog.tif';
-
 // THEMIS night IR colormap (cold → warm), shared by the SVG filter and the legend
 const THERMAL_RDBU_STOPS = ['#2166ac', '#67a9cf', '#f7f7f7', '#ef8a62', '#b2182b'];
 
@@ -614,7 +611,7 @@ export default function MissionPlanner() {
 
   // 3. Active 3-Filter Preset + Manual Layer Opacity Controls
   const [activeFilters, setActiveFilters] = useState({ ...DEFAULT_FILTERS });
-  const [rasterOpacities, setRasterOpacities] = useState({
+  const [rasterOpacities] = useState({
     hiriseJez: 1.0,
     ctxJez: 1.0,
     molaHrsc: 0.65,
@@ -624,7 +621,7 @@ export default function MissionPlanner() {
   });
 
   // 4. Telemetry state
-  const [mapStatusLog, setMapStatusLog] = useState([
+  const [, setMapStatusLog] = useState([
     'Initializing Jezero L.CRS.EPSG4326 map...',
     'Loaded PDS Analyst’s Notebook package (Séítah & Western Delta).'
   ]);
@@ -2638,12 +2635,6 @@ export default function MissionPlanner() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // SMALL MISSION HUB LAYOUT HELPERS
 // ═══════════════════════════════════════════════════════════════════════════════
-const ROLE_LABELS = {
-  scientist: 'Scientist',
-  control: 'Mission Control',
-  astronaut: 'Astronaut'
-};
-
 // Horizontal chip row: fades at the edges and shows scroll arrows only when there is more to see
 function ChipScroller({ label, children }) {
   const ref = useRef(null);
