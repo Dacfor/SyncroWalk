@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Crosshair, FlaskConical, Gem, Lightbulb, List, Map as MapIcon, MapPin, MapPinPlus, Pencil, PlusCircle, Trash2 } from 'lucide-react';
+import { Crosshair, FlaskConical, Gem, Lightbulb, List, Map as MapIcon, MapPin, MapPinPlus, Pencil, PlusCircle, ScrollText, Trash2 } from 'lucide-react';
+import MissionLog from './MissionLog.tsx';
 import { DiscoveryDetail, DiscoveryList } from './Discoveries.tsx';
 import { Card, Label, PanelTabs, Segmented, TabPanel } from './ui.tsx';
-import { FIELD_EVENT_META, INTEREST_TYPES, PRIORITY_META, TODAY_SOL, planFor } from './model.ts';
+import { FIELD_EVENT_META, INTEREST_TYPES, PRIORITY_META, planFor } from './model.ts';
 import {
   CONSTRAINT_STATUS,
   DEMO_ASSUMPTIONS as A,
@@ -20,7 +21,7 @@ import type { FieldEvent, Poi } from './model.ts';
 import type { PlannerStore } from './usePlannerStore.ts';
 
 type LatLon = { lat: number; lon: number } | null;
-export type ScientistView = 'define' | 'list' | 'discoveries' | 'hypotheses';
+export type ScientistView = 'define' | 'list' | 'discoveries' | 'hypotheses' | 'log';
 
 const EMPTY_FORM = {
   name: '',
@@ -183,7 +184,7 @@ export default function ScientistPanel({
     }
     // Not scheduled: cost of adding it as a detour to the next mission with stops
     const next = [...state.missions]
-      .filter((m) => m.sol >= TODAY_SOL && m.poiIds.length)
+      .filter((m) => m.sol >= state.todaySol && m.poiIds.length)
       .sort((a, b) => a.sol - b.sol)[0];
     if (!next) return { text: 'Not scheduled yet · no upcoming mission to compare with', status: 'ok' };
     const plan = planFor(state, next);
@@ -229,10 +230,11 @@ export default function ScientistPanel({
         value={view}
         onChange={setView}
         tabs={[
-          { id: 'define', label: editingId ? 'Edit point' : 'Add point', icon: MapPinPlus },
-          { id: 'list', label: 'My points', icon: List, badge: state.pois.length },
+          { id: 'define', label: editingId ? 'Edit' : 'Add', icon: MapPinPlus },
+          { id: 'list', label: 'POIs', icon: List, badge: state.pois.length },
           { id: 'discoveries', label: 'Discoveries', icon: Gem, badge: fieldEvents.filter((f) => !poiFromFe(f.id)).length },
-          { id: 'hypotheses', label: 'Hypotheses', icon: Lightbulb }
+          { id: 'hypotheses', label: 'Hypotheses', icon: Lightbulb },
+          { id: 'log', label: 'Log', icon: ScrollText }
         ]}
       />
 
@@ -245,7 +247,7 @@ export default function ScientistPanel({
         icon={MapPin}
         highlight={pickMode}
       >
-        <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
+        <form className="flex flex-col gap-2.5" onSubmit={submit} noValidate>
           <div>
             <Label htmlFor="poi-name">Name</Label>
             <input
@@ -257,7 +259,7 @@ export default function ScientistPanel({
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div>
               <Label htmlFor="poi-lat">Latitude (°N)</Label>
               <input
@@ -288,7 +290,7 @@ export default function ScientistPanel({
             aria-pressed={pickMode}
             className={`mh-btn self-start ${pickMode ? 'mh-btn--primary' : 'mh-btn--tinted'}`}
           >
-            <Crosshair className="w-5 h-5" />
+            <Crosshair className="w-4 h-4" />
             {pickMode ? 'Click a point on the map… (cancel)' : 'Pick on map'}
           </button>
 
@@ -310,15 +312,15 @@ export default function ScientistPanel({
             <Label htmlFor="poi-info">Information to collect</Label>
             <textarea
               id="poi-info"
-              className="mh-input min-h-24 resize-y"
+              className="mh-input min-h-16 resize-y"
               value={form.infoToCollect}
               onChange={(e) => set('infoToCollect', e.target.value)}
               placeholder="e.g. Mineral chemistry of the vein, context images, layering"
             />
           </div>
 
-          <div className="flex flex-col gap-2">
-            <span className="mh-label !text-base">Collect samples for analysis?</span>
+          <div className="flex flex-col gap-1.5">
+            <span className="mh-label">Collect samples for analysis?</span>
             <Segmented
               label="Collect samples"
               value={form.samplesRequired}
@@ -349,9 +351,9 @@ export default function ScientistPanel({
             </div>
           )}
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-1.5">
             <button type="submit" className="mh-btn mh-btn--primary">
-              <PlusCircle className="w-5 h-5" />
+              <PlusCircle className="w-4 h-4" />
               {editingId ? 'Save changes' : 'Add point of interest'}
             </button>
             {(editingId || form.name || form.lat || form.lon) && (
@@ -401,7 +403,7 @@ export default function ScientistPanel({
             )}
 
             <div className="flex flex-col gap-1">
-              <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">Linked hypothesis</span>
+              <span className="mh-stat-label">Linked hypothesis</span>
               {hyps.length ? (
                 hyps.map((x) => (
                   <span key={x.id} className="text-base">
@@ -414,11 +416,11 @@ export default function ScientistPanel({
             </div>
 
             <div className="mh-tile !gap-1.5">
-              <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">
+              <span className="mh-stat-label">
                 Operational impact · Mission Control model
               </span>
-              <span className="flex flex-wrap items-center gap-2 text-base">
-                <span className={`mh-pill ${CONSTRAINT_STATUS[impact.status as keyof typeof CONSTRAINT_STATUS].cls} !text-[13px]`}>
+              <span className="flex flex-wrap items-center gap-1.5 text-base">
+                <span className={`mh-pill ${CONSTRAINT_STATUS[impact.status as keyof typeof CONSTRAINT_STATUS].cls} !text-[12px]`}>
                   {CONSTRAINT_STATUS[impact.status as keyof typeof CONSTRAINT_STATUS].label}
                 </span>
                 <span>{impact.text}</span>
@@ -428,8 +430,8 @@ export default function ScientistPanel({
 
             {post?.pixl && (
               <details>
-                <summary className="cursor-pointer text-base font-semibold text-mh-link min-h-11 flex items-center">Instrument notes</summary>
-                <dl className="m-0 flex flex-col gap-2 pt-1">
+                <summary className="cursor-pointer text-base font-semibold text-mh-link min-h-7 flex items-center">Instrument notes</summary>
+                <dl className="m-0 flex flex-col gap-1.5 pt-1">
                   {[
                     ['SuperCam', post.supercam],
                     ['PIXL XRF', post.pixl],
@@ -439,7 +441,7 @@ export default function ScientistPanel({
                     .filter(([, v]) => v)
                     .map(([k, v]) => (
                       <div key={k} className="flex flex-col gap-0.5">
-                        <dt className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">{k}</dt>
+                        <dt className="mh-stat-label">{k}</dt>
                         <dd className="m-0 text-base">{v}</dd>
                       </div>
                     ))}
@@ -453,56 +455,58 @@ export default function ScientistPanel({
         eyebrow="Science targets"
         title="Your points of interest"
         subtitle={awaiting > 0 ? `${awaiting} waiting for a priority from mission control.` : 'All points have a priority.'}
-        aside={<span className="mh-pill mh-pill--info">{state.pois.length} defined</span>}
+        aside={<span className="mh-count">{state.pois.length}</span>}
       >
         {state.pois.length === 0 && (
-          <div className="flex flex-col gap-3 items-start">
+          <div className="flex flex-col gap-2 items-start">
             <p className="m-0 text-base text-mh-text2">No points of interest yet.</p>
             <button type="button" className="mh-btn mh-btn--primary" onClick={() => setView('define')}>
-              <PlusCircle className="w-5 h-5" /> Add the first one
+              <PlusCircle className="w-4 h-4" /> Add the first one
             </button>
           </div>
         )}
-        <ul className="m-0 p-0 list-none flex flex-col gap-2">
+        <ul className="m-0 p-0 list-none flex flex-col gap-1.5">
           {state.pois.map((poi) => {
             const sols = scheduledSols(poi.id);
             return (
               <li
                 key={poi.id}
-                className={`p-4 rounded-mh-md flex flex-col gap-2 ${
+                className={`p-2.5 rounded-mh-md flex flex-col gap-1.5 ${
                   selectedPoiId === poi.id ? 'bg-mh-fill-blue' : 'bg-mh-fill'
                 }`}
               >
                 <button
                   type="button"
                   onClick={() => onFocusPoi(poi)}
-                  className="text-left bg-transparent border-0 p-0 cursor-pointer text-mh-text flex flex-col gap-1 min-h-11"
+                  className="text-left bg-transparent border-0 p-0 cursor-pointer text-mh-text flex flex-col gap-1 min-h-7"
                 >
-                  <span className="font-mono text-[13px] text-mh-text2">
+                  <span className="font-mono text-[12px] text-mh-text2">
                     {poi.id} · {poi.lat.toFixed(5)}° N, {poi.lon.toFixed(5)}° E
                   </span>
                   <strong className="text-base">{poi.name}</strong>
                 </button>
-                <div className="flex flex-wrap gap-2">
-                  <span className="mh-pill mh-pill--info">{poi.interestType}</span>
-                  <span className={`mh-pill ${poi.samplesRequired ? 'mh-pill--ok' : 'mh-pill--info'}`}>
-                    {poi.samplesRequired ? 'Samples required' : 'No samples'}
-                  </span>
+                <div className="flex flex-wrap gap-1.5">
+                  <span className="mh-tag">{poi.interestType}</span>
+                  <span className="mh-tag">{poi.samplesRequired ? 'Samples required' : 'No samples'}</span>
                   {poi.priority ? (
-                    <span className={`mh-pill ${PRIORITY_META[poi.priority].cls}`}>
+                    <span className={`${PRIORITY_META[poi.priority].cls}`}>
                       Priority: {PRIORITY_META[poi.priority].label}
                     </span>
                   ) : (
-                    <span className="mh-pill mh-pill--warn">Awaiting priority</span>
+                    <span className="mh-pill mh-pill--info">Awaiting priority</span>
                   )}
-                  {state.measured.includes(poi.id) && <span className="mh-pill mh-pill--ok">Measured</span>}
+                  {(state.measured.includes(poi.id) || poi.measuredAt) && (
+                    <span className="mh-pill mh-pill--ok">Measured in situ{poi.measuredAt ? ` · ${poi.measuredAt}` : ''}</span>
+                  )}
+                  {!poi.pdsInSituPosterior && <span className="mh-pill mh-pill--off">Orbital prior only</span>}
+                  {poi.parentId && <span className="mh-pill mh-pill--info">Follow-up of {poi.parentId}</span>}
                   {sols.length > 0 && (
                     <span className="mh-pill mh-pill--ok">Scheduled Sol {sols.join(', ')}</span>
                   )}
                 </div>
                 <p className="m-0 text-base text-mh-text2">{poi.infoToCollect}</p>
-                <div className="flex gap-2">
-                  <button type="button" onClick={() => startEdit(poi)} className="mh-btn mh-btn--plain !px-4">
+                <div className="flex gap-1.5">
+                  <button type="button" onClick={() => startEdit(poi)} className="mh-btn mh-btn--plain !px-2.5">
                     <Pencil className="w-4 h-4" /> Edit
                   </button>
                   <button
@@ -514,7 +518,7 @@ export default function ScientistPanel({
                         onToast(`${poi.id} deleted`);
                       }
                     }}
-                    className="mh-btn mh-btn--danger !px-4"
+                    className="mh-btn mh-btn--danger !px-2.5"
                   >
                     <Trash2 className="w-4 h-4" /> Delete
                   </button>
@@ -536,7 +540,7 @@ export default function ScientistPanel({
             icon={Gem}
           >
             <button type="button" className="mh-btn mh-btn--tinted self-start" onClick={onOpenFieldMap}>
-              <MapIcon className="w-5 h-5" /> Open discoveries map
+              <MapIcon className="w-4 h-4" /> Open discoveries map
             </button>
             <DiscoveryList
               fieldEvents={fieldEvents}
@@ -560,6 +564,12 @@ export default function ScientistPanel({
         </TabPanel>
       )}
 
+      {view === 'log' && (
+        <TabPanel id="log">
+          <MissionLog state={state} />
+        </TabPanel>
+      )}
+
       {view === 'hypotheses' && (
         <TabPanel id="hypotheses">
           <Card eyebrow={`Objective · ${MISSION_OBJECTIVE}`} title="Hypotheses" icon={Lightbulb} aside={<SimBadge />}>
@@ -567,18 +577,18 @@ export default function ScientistPanel({
               Status from the in-situ measurements of the targets that test each hypothesis (demo rule: a result 1σ above the
               orbital prior supports it, 1σ below weakens it).
             </p>
-            <ul className="m-0 p-0 list-none flex flex-col gap-2">
+            <ul className="m-0 p-0 list-none flex flex-col gap-1.5">
               {HYPOTHESES.map((hy) => {
                 const meta = HYPOTHESIS_STATUS[hypothesisStatus(hy, state.pois) as keyof typeof HYPOTHESIS_STATUS];
                 return (
-                  <li key={hy.id} className="mh-tile !gap-2">
-                    <span className="flex flex-wrap items-center gap-2">
+                  <li key={hy.id} className="mh-tile !gap-1.5">
+                    <span className="flex flex-wrap items-center gap-1.5">
                       <strong className="text-base">{hy.id}</strong>
-                      <span className={`mh-pill ${meta.cls} !text-[13px]`}>{meta.label}</span>
+                      <span className={`mh-pill ${meta.cls} !text-[12px]`}>{meta.label}</span>
                     </span>
                     <span className="text-base">{hy.title}</span>
                     <span className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-[14px] text-mh-text2">Tested by</span>
+                      <span className="text-[12px] text-mh-text2">Tested by</span>
                       {hy.poiIds.map((pid) => {
                         const poi = state.pois.find((p) => p.id === pid);
                         return poi ? (
@@ -586,12 +596,12 @@ export default function ScientistPanel({
                             key={pid}
                             type="button"
                             onClick={() => onOpenPoiPopup(poi)}
-                            className="mh-btn bg-mh-card text-mh-text !min-h-11 !px-4 !text-[15px]"
+                            className="mh-btn bg-mh-card text-mh-text !min-h-7 !px-2.5 !text-[13px]"
                           >
                             {pid}
                           </button>
                         ) : (
-                          <span key={pid} className="text-[14px] text-mh-text2">
+                          <span key={pid} className="text-[12px] text-mh-text2">
                             {pid} (not a target yet)
                           </span>
                         );

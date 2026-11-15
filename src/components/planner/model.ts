@@ -1,4 +1,14 @@
-import { BASE, DEMO_ASSUMPTIONS, TIME_WINDOW, computeMissionMetrics, evaluateConstraints } from './analysis.ts';
+import {
+  BASE,
+  DEMO_ASSUMPTIONS,
+  SHELTERS,
+  TRAFFIC_FACTOR,
+  TIME_WINDOW,
+  computeMissionMetrics,
+  evaluateConstraints,
+  missionReason,
+  remainingEvasByDose
+} from './analysis.ts';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SHARED MISSION-PLANNING MODEL
@@ -37,6 +47,10 @@ export interface Poi {
   };
   orbitalPrior?: { uncertainty: string; mineral?: string; hydrationEst?: string };
   geologicalUnit?: string;
+  /** Follow-up target derived from another POI (e.g. POI-2b, closer sampling) */
+  parentId?: string;
+  /** When the in-situ measurement was taken, e.g. "Sol 2 · 11:05 LST" */
+  measuredAt?: string;
 }
 
 export interface DailyMission {
@@ -46,6 +60,103 @@ export interface DailyMission {
   poiIds: string[]; // ordered stops; the route always starts and ends at the base
   extraEquipment: string[];
   status: MissionStatus;
+  /** Crew ids of the two astronauts going out [EV1, EV2]; default = the roster seats */
+  evaPair?: [string, string];
+  /** Plan version (v1, v2, …): a replan creates a new version */
+  version?: number;
+  approvedBy?: string;
+  /** Replan only: time on site for this mission, when shorter than the POI default */
+  durationOverrides?: Record<string, number>;
+  /** Replan only: the route passes by the field shelter after this many stops */
+  viaShelterAfter?: number | null;
+  /** The last replan applied to this mission (before / after comparison) */
+  replan?: ReplanRecord;
+  /** Id of the post-EVA debrief, once the crew has submitted it */
+  debriefId?: string;
+}
+
+// ── Post-EVA debrief (astronaut → scientist, mission control) ────────────────
+export type PoiOutcome = 'completed' | 'partial' | 'skipped';
+export type TrafficRating = 'easier' | 'expected' | 'harder';
+export interface DebriefPoi {
+  poiId: string;
+  status: PoiOutcome;
+  reason: string;
+  samples: { id: string; collected: boolean; note: string }[];
+  observation: string;
+  proposePoi: boolean;
+}
+export interface DebriefLeg {
+  from: string;
+  to: string;
+  a: [number, number];
+  b: [number, number];
+  rating: TrafficRating;
+}
+export interface Debrief {
+  id: string;
+  missionId: string;
+  sol: number;
+  planVersion: number;
+  pois: DebriefPoi[];
+  legs: DebriefLeg[];
+  actualMin: number;
+  borg: number; // perceived exertion, Borg 6–20
+  suitIssues: string;
+  dust: 'none' | 'light' | 'heavy';
+  dosimeterMsv: number;
+  tlx: { mental: number; physical: number; temporal: number }; // simplified NASA-TLX, 0–100
+  psych: string;
+  signedBy: string;
+  signedAt: string;
+}
+
+/** A stretch walked by the crew, with the trafficability they found. */
+export interface TrafficObs {
+  a: [number, number];
+  b: [number, number];
+  rating: TrafficRating;
+  factor: number;
+  sol: number;
+  note?: string;
+}
+
+/** A past EVA (route history layer). */
+export interface PastEva {
+  id: string;
+  sol: number;
+  pair: string[]; // names
+  planVersion: string;
+  poiIds: string[]; // planned
+  reached: string[];
+  outcome: 'completed' | 'partial' | 'aborted';
+  plannedMin: number;
+  actualMin: number;
+  reason?: string; // why it was cut short
+  viaShelter?: boolean; // the crew went to the field shelter
+}
+
+/** Notification shown in the other roles' views (e.g. "Sol N debrief received"). */
+export interface Notice {
+  id: string;
+  sol: number;
+  title: string;
+  text: Partial<Record<Role, string>>;
+  seenBy: Role[];
+}
+
+// Mission log: one line per decision, with the evidence that drove it
+export type LogType = 'science' | 'safety' | 'replan';
+export interface LogEntry {
+  id: string;
+  sol: number;
+  ts: string; // LST
+  type: LogType;
+  planVersion: string;
+  evidence: string;
+  decision: string;
+  approvedBy: string;
+  outcome: string;
 }
 
 export interface PlannerState {
@@ -55,11 +166,23 @@ export interface PlannerState {
   fieldEvents: FieldEvent[]; // in-situ discoveries & anomaly reports (crew → scientist & route model)
   measured: string[]; // POI ids measured in the field by the astronauts
   sepAlert: boolean; // scripted SEP / DONKI alert (demo switch in Mission Control)
+  crew: CrewMember[]; // crew status (simulated telemetry); dose is updated by the EVA debriefs
+  log: LogEntry[]; // mission log (plan versions, evidence, decisions)
+  todaySol: number; // "today" of the loaded scenario
+  scenarioId: string;
+  debriefs: Debrief[];
+  traffic: TrafficObs[]; // trafficability validated in situ
+  evaHistory: PastEva[]; // past EVAs (route history)
+  notices: Notice[];
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
 export { BASE } from './analysis.ts';
-export const TODAY_SOL = 24;
+export const TODAY_SOL = 24; // "today" of the default scenario; use state.todaySol everywhere else
+// Sol → Earth date (simulated landing date; 1 sol = 1.02749 days)
+export const LANDING_DATE = '2039-08-02';
+export const solDate = (sol: number) =>
+  new Date(Date.parse(`${LANDING_DATE}T00:00:00Z`) + (sol - 1) * 1.0274912517 * 86400000).toISOString().slice(0, 10);
 export const WALK_SPEED_KMH = DEMO_ASSUMPTIONS.walkSpeedKmhFlat; // flat-ground speed; terrain slows it down
 export const LATEST_RETURN = TIME_WINDOW.latestReturn; // demo parameter: latest return to base (LST)
 export const DAYLIGHT = { start: '08:00', end: '16:00' };
@@ -96,16 +219,22 @@ export const STANDARD_EQUIPMENT = [
 export const SAMPLE_KIT = 'Sample tubes & sealing kit';
 
 export const PRIORITY_META: Record<Priority, { label: string; cls: string; color: string }> = {
-  HIGH: { label: 'High', cls: 'mh-pill--crit', color: 'var(--mh-accent)' },
-  MED: { label: 'Medium', cls: 'mh-pill--warn', color: 'var(--mh-warn)' },
-  LOW: { label: 'Low', cls: 'mh-pill--info', color: 'var(--mh-info)' }
+  // Priority is not a status: neutral tags, no status colour
+  HIGH: { label: 'High', cls: 'mh-tag mh-tag--p1', color: '#FFFFFF' },
+  MED: { label: 'Medium', cls: 'mh-tag', color: '#9BB8D6' },
+  LOW: { label: 'Low', cls: 'mh-tag mh-tag--p3', color: '#4A6FA5' }
 };
 
 // Field discoveries (FE-…) logged during EVAs: colour, label and suggested interest type per class
+// Field-event classes that are operational hazards (the only ones Mission Control sees);
+// science discoveries stay with the Scientist until they are turned into a POI.
+export const HAZARD_CLASSES = ['boulder', 'soft-soil'];
+export const isHazard = (fe: { class: string }) => HAZARD_CLASSES.includes(fe.class);
+
 export const FIELD_EVENT_META: Record<string, { color: string; label: string; interestType: string }> = {
-  'formation-interest': { color: '#38bdf8', label: 'Formation of interest', interestType: 'Geology' },
-  boulder: { color: '#E5484D', label: 'Boulder hazard', interestType: 'Hazard survey' },
-  'soft-soil': { color: '#E5C04A', label: 'Soft soil', interestType: 'Hazard survey' }
+  'formation-interest': { color: '#2DCCFF', label: 'Formation of interest', interestType: 'Geology' },
+  boulder: { color: '#FFB302', label: 'Boulder hazard', interestType: 'Hazard survey' },
+  'soft-soil': { color: '#FCE83A', label: 'Soft soil', interestType: 'Hazard survey' }
 };
 
 export interface FieldEvent {
@@ -151,6 +280,7 @@ export type ScheduleItem =
   | { kind: 'egress'; start: string; end: string }
   | { kind: 'travel'; from: string; to: string; km: number; minutes: number; start: string; end: string }
   | { kind: 'stop'; poi: Poi; order: number; start: string; end: string }
+  | { kind: 'shelter'; name: string; start: string; end: string }
   | { kind: 'ingress'; start: string; end: string };
 
 export interface MissionPlan {
@@ -173,7 +303,10 @@ export interface MissionPlan {
 
 export interface PlanContext {
   fieldEvents?: FieldEvent[];
+  traffic?: TrafficObs[];
   sepAlert?: boolean;
+  pair?: { id: string; name: string; doseActualMsv: number }[]; // EVA pair, for the dose-budget check
+  sol?: number;
 }
 
 // ── Terrain-following route geometry ────────────────────────────────────────
@@ -227,16 +360,36 @@ export const terrainLeg = (
   return out;
 };
 
+// Field shelter used when a replan diverts the route (the base is the other shelter)
+const FIELD_SHELTER = SHELTERS.find((sh: { id: string }) => sh.id === 'ALCOVE') ?? SHELTERS[SHELTERS.length - 1];
+export const FIELD_SHELTER_NAME = `${FIELD_SHELTER.name} (SEP shelter)`;
+
 /**
  * Route from the base through every stop and back, following the terrain, with a timed schedule.
  * Times come from the EVA model in analysis.ts: egress/ingress, walking speed reduced by slope,
  * soft soil and not-evaluated terrain, time on site set by mission control.
+ * A replan can shorten the time on site of a stop for this mission only (`durationOverrides`)
+ * and divert the route via the field shelter (`viaShelterAfter` = number of stops before it).
  */
 export const planMission = (mission: DailyMission, pois: Poi[], ctx: PlanContext = {}): MissionPlan => {
   const stops = mission.poiIds
     .map((id) => pois.find((p) => p.id === id))
-    .filter((p): p is Poi => Boolean(p));
-  const waypoints = [BASE, ...stops, BASE].map(({ lat, lon }) => ({ lat, lon }));
+    .filter((p): p is Poi => Boolean(p))
+    .map((p) => ({ ...p, durationMin: mission.durationOverrides?.[p.id] ?? p.durationMin }));
+  // Sequence walked: the POIs, plus the field shelter when the route is diverted via it
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const seq: any[] = [...stops];
+  if (mission.viaShelterAfter != null && stops.length) {
+    seq.splice(Math.min(mission.viaShelterAfter, stops.length), 0, {
+      id: 'SHELTER',
+      name: FIELD_SHELTER_NAME,
+      lat: FIELD_SHELTER.lat,
+      lon: FIELD_SHELTER.lon,
+      durationMin: 0,
+      isShelter: true
+    });
+  }
+  const waypoints = [BASE, ...seq, BASE].map(({ lat, lon }) => ({ lat, lon }));
   const legs = waypoints.slice(1).map((to, i) => {
     // Seed by the two endpoints: the same leg keeps the same shape in every mission
     const from = waypoints[i];
@@ -244,11 +397,12 @@ export const planMission = (mission: DailyMission, pois: Poi[], ctx: PlanContext
   });
   const path = legs.flatMap((leg, i) => (i === 0 ? leg : leg.slice(1)));
 
-  const metrics = computeMissionMetrics(waypoints, legs, stops, mission.startTime, ctx);
+  const metrics = computeMissionMetrics(waypoints, legs, seq, mission.startTime, ctx);
   const at = (min: number) => toHHMM(toMin(mission.startTime) + min);
-  const names = [BASE.name, ...stops.map((st) => st.id), BASE.name];
+  const names = [BASE.name, ...seq.map((st) => (st.isShelter ? st.name : st.id)), BASE.name];
 
   const schedule: ScheduleItem[] = [{ kind: 'egress', start: at(0), end: at(DEMO_ASSUMPTIONS.egressMin) }];
+  let order = 0;
   metrics.legStats.forEach((leg: { km: number; startMin: number; endMin: number }, i: number) => {
     schedule.push({
       kind: 'travel',
@@ -259,8 +413,9 @@ export const planMission = (mission: DailyMission, pois: Poi[], ctx: PlanContext
       start: at(leg.startMin),
       end: at(leg.endMin)
     });
-    const stop = stops[i];
-    if (stop) schedule.push({ kind: 'stop', poi: stop, order: i + 1, start: at(leg.endMin), end: at(leg.endMin + stop.durationMin) });
+    const stop = seq[i];
+    if (stop?.isShelter) schedule.push({ kind: 'shelter', name: stop.name, start: at(leg.endMin), end: at(leg.endMin) });
+    else if (stop) schedule.push({ kind: 'stop', poi: stop, order: ++order, start: at(leg.endMin), end: at(leg.endMin + stop.durationMin) });
   });
   const lastArrival = metrics.legStats.length ? metrics.legStats[metrics.legStats.length - 1].endMin : DEMO_ASSUMPTIONS.egressMin;
   schedule.push({ kind: 'ingress', start: at(lastArrival), end: metrics.endLst });
@@ -277,13 +432,235 @@ export const planMission = (mission: DailyMission, pois: Poi[], ctx: PlanContext
     schedule,
     equipment: equipmentFor(mission, stops),
     metrics,
-    evaluation: evaluateConstraints(metrics, { sepAlert: ctx.sepAlert })
+    evaluation: evaluateConstraints(metrics, { sepAlert: ctx.sepAlert, pair: ctx.pair, sol: ctx.sol })
   };
 };
 
-/** Plan of a mission with the shared context (field reports slow the route, SEP alert). */
+/**
+ * Track actually walked on a past EVA (route history layer): base → POIs reached → base.
+ * An aborted EVA turns back halfway to the POI it did not reach, via the field shelter if the
+ * crew sheltered there. Each EVA gets its own meander, like a recorded track.
+ */
+export const pastEvaPath = (eva: PastEva, pois: Poi[]): { lat: number; lon: number }[] => {
+  const at = (id: string) => pois.find((p) => p.id === id);
+  const pts: { lat: number; lon: number }[] = [BASE, ...eva.reached.map(at).filter((p): p is Poi => Boolean(p))];
+  const leg = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => terrainLeg(a, b, `${eva.id}:${a.lat},${a.lon}>${b.lat},${b.lon}`);
+  let path = pts.slice(1).flatMap((to, i) => leg(pts[i], to).slice(i === 0 ? 0 : 1));
+  if (!path.length) path = [BASE];
+  if (eva.outcome === 'aborted') {
+    const missed = at(eva.poiIds.find((id) => !eva.reached.includes(id)) ?? '');
+    if (missed) {
+      const out = leg(path[path.length - 1], missed);
+      path = [...path, ...out.slice(1, Math.ceil(out.length / 2))];
+    }
+    if (eva.viaShelter) path = [...path, ...leg(path[path.length - 1], FIELD_SHELTER).slice(1)];
+  }
+  return [...path, ...leg(path[path.length - 1], BASE).slice(1)];
+};
+
+/**
+ * Plan of a mission with the shared context: field reports slow the route, the SEP alert
+ * applies to today's EVA only, and the EVA pair must have dose budget left.
+ */
 export const planFor = (state: PlannerState, mission: DailyMission) =>
-  planMission(mission, state.pois, { fieldEvents: state.fieldEvents, sepAlert: state.sepAlert });
+  planMission(mission, state.pois, {
+    fieldEvents: state.fieldEvents,
+    traffic: state.traffic,
+    sepAlert: state.sepAlert && mission.sol === state.todaySol,
+    pair: crewAssignment(state.crew, mission)
+      .filter((c) => c.seatNow === 'EV1' || c.seatNow === 'EV2')
+      .map((c) => ({ id: c.id, name: c.name, doseActualMsv: c.doseActualMsv })),
+    sol: mission.sol
+  });
+
+// ── NO-GO → suggested replan ────────────────────────────────────────────────
+export const APPROVER = 'Flight Dir. M. Vance';
+export type ReplanStepCode = 'crew' | 'a' | 'b' | 'c' | 'd' | 'sci';
+export interface ReplanStep {
+  code: ReplanStepCode;
+  text: string;
+}
+export interface PlanSummary {
+  sol: number;
+  poiIds: string[];
+  km: number;
+  durationMin: number;
+  bufferMin: number;
+  doseMsv: number;
+  shelterMin: number;
+  viaShelter: boolean;
+  overall: string;
+  violated: string[]; // names of the violated constraints
+  pair: string[]; // names of the EVA pair
+}
+export interface ReplanRecord {
+  fromVersion: number;
+  toVersion: number;
+  ts: string;
+  reason: string; // the binding constraint of the plan that was NO-GO
+  steps: ReplanStep[];
+  before: PlanSummary;
+  after: PlanSummary;
+}
+export interface ReplanSuggestion extends Omit<ReplanRecord, 'ts'> {
+  mission: DailyMission; // the replanned mission (not saved yet)
+  ok: boolean; // false when no compliant plan was found
+}
+
+export const missionVersion = (m: DailyMission) => m.version ?? 1;
+
+export const summarizePlan = (state: PlannerState, mission: DailyMission): PlanSummary => {
+  const plan = planFor(state, mission);
+  const m = plan.metrics;
+  return {
+    sol: mission.sol,
+    poiIds: plan.stops.map((p) => p.id),
+    km: m.distanceKm,
+    durationMin: m.evaDurationMin,
+    bufferMin: m.bufferMin,
+    doseMsv: m.doseEvaMsv,
+    shelterMin: m.maxTimeToShelterMin,
+    viaShelter: m.viaShelter,
+    overall: plan.evaluation.overall,
+    violated: plan.evaluation.rows.filter((r: { status: string }) => r.status === 'violated').map((r: { name: string }) => r.name),
+    pair: crewAssignment(state.crew, mission)
+      .filter((c) => c.seatNow.startsWith('EV'))
+      .map((c) => c.name)
+  };
+};
+
+const PRIORITY_ORDER: Record<string, number> = { HIGH: 0, MED: 1, LOW: 2, NONE: 3 };
+
+/**
+ * When a mission is NO-GO, proposes a plan that meets every constraint. Strategy, in order:
+ *  (a) drop the lowest-priority (then farthest) POI;
+ *  (b) shorten the time on site of the non-priority POIs;
+ *  (c) divert the route via the nearest field shelter;
+ *  (d) postpone the EVA to the next free sol.
+ * Before that, an EVA crew member without dose budget is swapped with someone from the habitat.
+ * Returns null when the mission is not NO-GO.
+ */
+export const suggestReplan = (state: PlannerState, mission: DailyMission): ReplanSuggestion | null => {
+  const A = DEMO_ASSUMPTIONS;
+  const first = planFor(state, mission);
+  if (first.evaluation.overall !== 'violated' || !first.stops.length) return null;
+  const badIds = (m: DailyMission): string[] =>
+    planFor(state, m)
+      .evaluation.rows.filter((r: { status: string }) => r.status === 'violated')
+      .map((r: { id: string }) => r.id);
+  const isGo = (m: DailyMission) => badIds(m).length === 0;
+  const TIME_IDS = ['duration', 'buffer', 'latest', 'consumables', 'dose', 'sepDuration'];
+  const routeBad = (ids: string[]) => ids.filter((id) => id !== 'sepVia' && !id.startsWith('crewDose'));
+  const poiOf = (id: string) => state.pois.find((p) => p.id === id);
+  const steps: ReplanStep[] = [];
+  let cur: DailyMission = { ...mission };
+
+  // Best position for the field shelter in the current stop list: a GO plan first, then the shortest
+  const withShelter = (m: DailyMission): DailyMission => {
+    const options = Array.from({ length: m.poiIds.length + 1 }, (_, i) => ({ ...m, viaShelterAfter: i }));
+    const km = (x: DailyMission) => planFor(state, x).metrics.distanceKm;
+    return options.sort((x, y) => Number(isGo(y)) - Number(isGo(x)) || km(x) - km(y))[0];
+  };
+
+  // Crew: swap anyone on the EVA pair who has no dose budget left
+  const exhausted = badIds(cur).filter((id) => id.startsWith('crewDose-')).map((id) => id.replace('crewDose-', ''));
+  if (exhausted.length) {
+    const seated = crewAssignment(state.crew, cur);
+    const pair = seated.filter((c) => c.seatNow.startsWith('EV')).map((c) => c.id);
+    const bench = seated
+      .filter((c) => c.seatNow.startsWith('IV'))
+      .sort((x, y) => remainingEvasByDose(y.doseActualMsv, cur.sol) - remainingEvasByDose(x.doseActualMsv, cur.sol));
+    exhausted.forEach((id) => {
+      const sub = bench.shift();
+      if (!sub || remainingEvasByDose(sub.doseActualMsv, cur.sol) < 1) return;
+      const out = seated.find((c) => c.id === id);
+      pair[pair.indexOf(id)] = sub.id;
+      steps.push({ code: 'crew', text: `EVA pair rotated: ${sub.name} replaces ${out?.name} (no dose budget left for an EVA)` });
+    });
+    cur = { ...cur, evaPair: pair as [string, string] };
+  }
+
+  // (a) drop one POI: a removal that gives a GO plan if there is one, else lowest priority, then farthest
+  const dropOne = (): boolean => {
+    if (cur.poiIds.length <= 1) return false;
+    const rank = (id: string) => PRIORITY_ORDER[poiOf(id)?.priority ?? 'NONE'];
+    const far = (id: string) => (poiOf(id) ? marsDistanceKm(BASE, poiOf(id) as Poi) : 0);
+    const without = (id: string) => {
+      const m = { ...cur, poiIds: cur.poiIds.filter((x) => x !== id) };
+      return cur.viaShelterAfter != null ? withShelter(m) : m;
+    };
+    const pick = [...cur.poiIds].sort(
+      (x, y) => Number(isGo(without(y))) - Number(isGo(without(x))) || rank(y) - rank(x) || far(y) - far(x)
+    )[0];
+    const before = planFor(state, cur).metrics.evaDurationMin;
+    cur = without(pick);
+    const after = planFor(state, cur).metrics.evaDurationMin;
+    const poi = poiOf(pick);
+    steps.push({
+      code: 'a',
+      text: `Dropped ${pick} (${poi?.priority ? PRIORITY_META[poi.priority].label.toLowerCase() : 'no'} priority, ${far(pick).toFixed(2)} km from the base): EVA shortened ${before} → ${after} min`
+    });
+    return true;
+  };
+  if (routeBad(badIds(cur)).length) dropOne();
+
+  // (b) shorten the time on site of the non-priority POIs
+  if (badIds(cur).some((id) => TIME_IDS.includes(id))) {
+    const overrides: Record<string, number> = { ...cur.durationOverrides };
+    const trimmed: string[] = [];
+    cur.poiIds.forEach((id) => {
+      const poi = poiOf(id);
+      const now = overrides[id] ?? poi?.durationMin ?? 0;
+      if (poi && poi.priority !== 'HIGH' && now > A.minStationMin) {
+        overrides[id] = A.minStationMin;
+        trimmed.push(`${id} ${now} → ${A.minStationMin} min`);
+      }
+    });
+    if (trimmed.length) {
+      cur = { ...cur, durationOverrides: overrides };
+      steps.push({ code: 'b', text: `Time on site shortened at the non-priority stops: ${trimmed.join(', ')}` });
+    }
+  }
+
+  // (c) divert the route via the nearest field shelter
+  if (badIds(cur).includes('sepVia')) {
+    const before = planFor(state, cur).metrics.distanceKm;
+    cur = withShelter(cur);
+    const after = planFor(state, cur).metrics.distanceKm;
+    steps.push({ code: 'c', text: `Route diverted via ${FIELD_SHELTER.name}, the nearest field shelter (+${Math.max(0, after - before).toFixed(2)} km)` });
+  }
+
+  // (a) again, until the route is compliant or one stop is left
+  while (routeBad(badIds(cur)).length && dropOne());
+
+  // (d) postpone to the next free sol
+  if (!isGo(cur)) {
+    const used = new Set(state.missions.filter((m) => m.id !== mission.id).map((m) => m.sol));
+    let sol = mission.sol + 1;
+    while (used.has(sol)) sol++;
+    const postponedOriginal: DailyMission = { ...mission, evaPair: cur.evaPair, sol };
+    const postponedTrimmed: DailyMission = { ...cur, sol };
+    if (isGo(postponedOriginal)) {
+      cur = postponedOriginal;
+      steps.length = 0;
+      steps.push({ code: 'd', text: `EVA postponed to Sol ${sol} with the original stops: no compliant EVA on Sol ${mission.sol}` });
+    } else if (isGo(postponedTrimmed)) {
+      cur = postponedTrimmed;
+      steps.push({ code: 'd', text: `EVA postponed to Sol ${sol}: still not compliant on Sol ${mission.sol}` });
+    }
+  }
+
+  return {
+    mission: cur,
+    ok: isGo(cur),
+    fromVersion: missionVersion(mission),
+    toVersion: missionVersion(mission) + 1,
+    reason: missionReason(first.evaluation, first.metrics).replace(/^NO-GO: /, ''),
+    steps,
+    before: summarizePlan(state, mission),
+    after: summarizePlan(state, cur)
+  };
+};
 
 /** Material to bring: instruments required at each stop + sample kit + extras chosen by control. */
 export const equipmentFor = (mission: DailyMission, stops: Poi[]) => {
@@ -389,20 +766,44 @@ export const SEED_STATE: PlannerState = {
       startTime: '09:30',
       poiIds: ['POI-1', 'POI-2'],
       extraEquipment: ['Spare battery pack', 'Navigation tablet'],
-      status: 'sent'
+      status: 'sent',
+      version: 1,
+      approvedBy: 'Flight Dir. M. Vance'
     },
     {
+      // Draft: POI-3 lies above the 19.4° delta scarp, on terrain not evaluated from orbit → NO-GO until replanned
       id: 'M-seed-25',
       sol: 25,
-      startTime: '10:00',
-      poiIds: ['POI-3'],
+      startTime: '09:30',
+      poiIds: ['POI-2', 'POI-3'],
       extraEquipment: ['Comms relay'],
-      status: 'sent'
+      status: 'draft',
+      version: 1
     }
   ],
   packed: {},
   measured: [],
   sepAlert: false,
+  crew: [], // filled below with CREW_ROSTER (declared after the seed)
+  todaySol: TODAY_SOL,
+  scenarioId: 'demo',
+  debriefs: [],
+  traffic: [],
+  evaHistory: [],
+  notices: [],
+  log: [
+    {
+      id: 'LOG-024-1',
+      sol: 24,
+      ts: 'Sol 24 · 08:30 LST',
+      type: 'science',
+      planVersion: 'v1',
+      evidence: 'Orbital CRISM prior: Fe/Mg smectite on the delta front, olivine + carbonate in Séítah',
+      decision: 'Sol 24 EVA to POI-1 and POI-2',
+      approvedBy: 'Flight Dir. M. Vance',
+      outcome: 'Plan v1 sent to the crew'
+    }
+  ],
   // Candidate field events & rapid in-situ discoveries (Sol 24)
   fieldEvents: [
     {
@@ -455,12 +856,16 @@ export const SEED_STATE: PlannerState = {
 };
 
 // ── Crew status (simulated telemetry, demo data — not real) ──────────────────
-// Surface dose = cumulative since landing, planned vs measured by suit dosimeter.
+// Crew of four: two go out (EV1, EV2), two stay in the habitat (IV1 comms / habitat,
+// IV2 science & medical support). `seat` is the default assignment; each daily mission can
+// name its own EVA pair (`evaPair`), so the pair can rotate from sol to sol.
+// Surface dose = cumulative since landing, planned vs measured by the personal dosimeter.
+export type CrewSeat = 'EV1' | 'EV2' | 'IV1' | 'IV2';
 export interface CrewMember {
   id: string;
   name: string;
-  role: string;
-  evaCrew: boolean; // goes out on the daily EVA
+  role: string; // specialty
+  seat: CrewSeat; // default seat
   evasCompleted: number;
   dosePlannedMsv: number;
   doseActualMsv: number;
@@ -469,12 +874,19 @@ export interface CrewMember {
   psych: string;
 }
 
+export const SEAT_LABEL: Record<CrewSeat, string> = {
+  EV1: 'EVA lead',
+  EV2: 'EVA',
+  IV1: 'Comms & habitat',
+  IV2: 'Science & medical support'
+};
+
 export const CREW_ROSTER: CrewMember[] = [
   {
-    id: 'EV1',
+    id: 'CM1',
     name: 'Cmdr. Lena Okafor',
-    role: 'EVA lead · Field geology',
-    evaCrew: true,
+    role: 'Field geology',
+    seat: 'EV1',
     evasCompleted: 7,
     dosePlannedMsv: 15.4,
     doseActualMsv: 14.9,
@@ -483,10 +895,10 @@ export const CREW_ROSTER: CrewMember[] = [
     psych: 'Nominal (Sol 23 check-in)'
   },
   {
-    id: 'EV2',
+    id: 'CM2',
     name: 'Dr. Samir Haddad',
-    role: 'EVA · Astrobiology & sampling',
-    evaCrew: true,
+    role: 'Astrobiology & sampling',
+    seat: 'EV2',
     evasCompleted: 6,
     dosePlannedMsv: 15.4,
     doseActualMsv: 15.6,
@@ -495,15 +907,171 @@ export const CREW_ROSTER: CrewMember[] = [
     psych: 'Nominal · reports short sleep'
   },
   {
-    id: 'IV',
+    id: 'CM3',
     name: 'Eng. Rui Tanaka',
-    role: 'IV operator · Base & comms',
-    evaCrew: false,
+    role: 'Systems & comms',
+    seat: 'IV1',
     evasCompleted: 3,
-    dosePlannedMsv: 12.6,
-    doseActualMsv: 12.2,
+    dosePlannedMsv: 15.4,
+    doseActualMsv: 14.6,
     vitals: { heartRate: 72, spo2: 98, sleepH: 7.6 },
     fatigue: 'Low',
     psych: 'Nominal'
+  },
+  {
+    id: 'CM4',
+    name: 'Dr. Maya Lindqvist',
+    role: 'Flight surgeon & geochemistry',
+    seat: 'IV2',
+    evasCompleted: 4,
+    dosePlannedMsv: 15.4,
+    doseActualMsv: 14.7,
+    vitals: { heartRate: 69, spo2: 98, sleepH: 7.3 },
+    fatigue: 'Low',
+    psych: 'Nominal (Sol 23 check-in)'
   }
 ];
+
+export interface SeatedCrew extends CrewMember {
+  seatNow: CrewSeat;
+}
+
+/** Who sits where for a mission: its EVA pair goes out, the other two stay in the habitat. */
+export const crewAssignment = (crew: CrewMember[], mission?: Pick<DailyMission, 'evaPair'> | null): SeatedCrew[] => {
+  const bySeat = (seat: CrewSeat) => crew.find((c) => c.seat === seat);
+  const pairIds = mission?.evaPair ?? [bySeat('EV1')?.id, bySeat('EV2')?.id];
+  const pair = pairIds.map((id) => crew.find((c) => c.id === id)).filter((c): c is CrewMember => Boolean(c));
+  const inside = crew.filter((c) => !pair.includes(c));
+  return [
+    ...pair.map((c, i) => ({ ...c, seatNow: (i === 0 ? 'EV1' : 'EV2') as CrewSeat })),
+    ...inside.map((c, i) => ({ ...c, seatNow: (i === 0 ? 'IV1' : 'IV2') as CrewSeat }))
+  ];
+};
+
+SEED_STATE.crew = CREW_ROSTER;
+
+// ── Post-EVA debrief → shared state ──────────────────────────────────────────
+// Pure: returns the new state. Observations become field events for the Scientist, the
+// trafficability updates the route model on the stretches walked, the dosimeter reading
+// updates the crew dose, the log gets "Sol N debrief received", the other roles get a notice.
+export const applyDebrief = (state: PlannerState, d: Debrief): PlannerState => {
+  const mission = state.missions.find((m) => m.id === d.missionId);
+  if (!mission) return state;
+  const plan = planFor(state, mission);
+  const pad = (n: number, len = 3) => String(n).padStart(len, '0');
+  const pairIds = crewAssignment(state.crew, mission)
+    .filter((c) => c.seatNow.startsWith('EV'))
+    .map((c) => c.id);
+
+  // Observations → field events (the Scientist's discoveries)
+  const observed = d.pois.filter((x) => x.observation.trim());
+  const newEvents: FieldEvent[] = observed.map((x, i) => {
+    const poi = state.pois.find((pp) => pp.id === x.poiId);
+    return {
+      id: `FE-${pad(d.sol)}-${pad(state.fieldEvents.filter((f) => f.id.startsWith(`FE-${pad(d.sol)}-`)).length + i + 1)}`,
+      ts: `Sol ${d.sol} · debrief ${d.signedAt}`,
+      source: `EVA debrief · ${d.signedBy}`,
+      method: 'crew observation',
+      class: 'formation-interest',
+      title: x.proposePoi ? `Proposed POI near ${x.poiId}: ${x.observation.trim().slice(0, 48)}` : `Observation at ${x.poiId}`,
+      confidence: 0.8,
+      lat: (poi?.lat ?? BASE.lat) + 0.00035,
+      lon: (poi?.lon ?? BASE.lon) + 0.0004,
+      photo: `VISORCAM_${d.id}_${x.poiId}`,
+      description: x.observation.trim(),
+      actionDirective: x.proposePoi ? 'The crew proposes a new point of interest here.' : 'For the Scientist to review.',
+      status: x.proposePoi ? 'proposed' : 'needs review'
+    };
+  });
+
+  // Trafficability → route model on the stretches walked
+  const newTraffic: TrafficObs[] = d.legs.map((l) => ({
+    a: l.a,
+    b: l.b,
+    rating: l.rating,
+    factor: TRAFFIC_FACTOR[l.rating],
+    sol: d.sol,
+    note: `${l.from} → ${l.to}`
+  }));
+  const harder = d.legs.filter((l) => l.rating === 'harder');
+  const easier = d.legs.filter((l) => l.rating === 'easier');
+
+  // Dose and crew status
+  const crew = state.crew.map((c) =>
+    pairIds.includes(c.id)
+      ? {
+          ...c,
+          doseActualMsv: Math.round((c.doseActualMsv + d.dosimeterMsv) * 100) / 100,
+          evasCompleted: c.evasCompleted + 1,
+          fatigue: (d.borg >= 15 ? 'High' : d.borg >= 12 ? 'Moderate' : 'Low') as CrewMember['fatigue'],
+          psych: `${d.psych || 'Nominal'} (Sol ${d.sol} debrief)`
+        }
+      : c
+  );
+
+  const done = d.pois.filter((x) => x.status === 'completed').map((x) => x.poiId);
+  const partial = d.pois.filter((x) => x.status !== 'completed');
+  const samples = d.pois.flatMap((x) => x.samples.filter((sm) => sm.collected));
+  const outcome: PastEva['outcome'] = partial.length ? 'partial' : 'completed';
+  const proposed = observed.filter((x) => x.proposePoi).length;
+  const terrain = harder.length
+    ? `terrain harder than predicted on ${harder.length} leg${harder.length === 1 ? '' : 's'} (${harder.map((l) => `${l.from} → ${l.to}`).join(', ')})`
+    : easier.length
+      ? `terrain easier than predicted on ${easier.length} leg${easier.length === 1 ? '' : 's'}`
+      : 'terrain as predicted';
+
+  return {
+    ...state,
+    debriefs: [...state.debriefs, d],
+    fieldEvents: [...state.fieldEvents, ...newEvents],
+    traffic: [...state.traffic, ...newTraffic],
+    crew,
+    measured: [...new Set([...state.measured, ...done])],
+    missions: state.missions.map((m) => (m.id === d.missionId ? { ...m, debriefId: d.id } : m)),
+    evaHistory: [
+      ...state.evaHistory,
+      {
+        id: `EVA-${pad(d.sol)}`,
+        sol: d.sol,
+        pair: crewAssignment(state.crew, mission)
+          .filter((c) => c.seatNow.startsWith('EV'))
+          .map((c) => c.name),
+        planVersion: `v${d.planVersion}`,
+        poiIds: plan.stops.map((x) => x.id),
+        reached: d.pois.filter((x) => x.status !== 'skipped').map((x) => x.poiId),
+        outcome,
+        plannedMin: plan.metrics.evaDurationMin,
+        actualMin: d.actualMin,
+        reason: partial.map((x) => `${x.poiId} ${x.status}${x.reason ? `: ${x.reason}` : ''}`).join('; ') || undefined,
+        viaShelter: plan.metrics.viaShelter
+      }
+    ],
+    log: [
+      ...state.log,
+      {
+        id: `LOG-${pad(d.sol)}-${state.log.length + 1}`,
+        sol: d.sol,
+        ts: `Sol ${d.sol} · ${d.signedAt}`,
+        type: harder.length || d.suitIssues.trim() ? 'safety' : 'science',
+        planVersion: `v${d.planVersion}`,
+        evidence: `Sol ${d.sol} debrief received: ${done.length}/${d.pois.length} POIs completed, ${samples.length} sample${samples.length === 1 ? '' : 's'}, ${terrain}, dosimeter ${d.dosimeterMsv.toFixed(2)} mSv, Borg ${d.borg}${d.suitIssues.trim() ? `, suit: ${d.suitIssues.trim()}` : ''}`,
+        decision: `${newEvents.length} observation${newEvents.length === 1 ? '' : 's'} sent to the Scientist${proposed ? ` (${proposed} proposed POI)` : ''}; route model updated on ${d.legs.length} leg${d.legs.length === 1 ? '' : 's'}; crew dose updated`,
+        approvedBy: d.signedBy,
+        outcome: `EVA ${outcome} in ${d.actualMin} min (planned ${plan.metrics.evaDurationMin})`
+      }
+    ],
+    notices: [
+      ...state.notices,
+      {
+        id: `N-${d.id}`,
+        sol: d.sol,
+        title: `Sol ${d.sol} debrief received`,
+        text: {
+          scientist: `${newEvents.length} new observation${newEvents.length === 1 ? '' : 's'} in Discoveries${proposed ? `, ${proposed} proposed as a new POI` : ''}; ${done.length} target${done.length === 1 ? '' : 's'} measured, ${samples.length} sample${samples.length === 1 ? '' : 's'} collected.`,
+          control: `Route model updated: ${terrain}. EVA pair dose +${d.dosimeterMsv.toFixed(2)} mSv each. Exertion Borg ${d.borg}${d.suitIssues.trim() ? `; suit issue: ${d.suitIssues.trim()}` : ''}.`
+        },
+        seenBy: []
+      }
+    ]
+  };
+};
