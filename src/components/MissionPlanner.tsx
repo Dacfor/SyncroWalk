@@ -1053,7 +1053,7 @@ const identifyWaypoint = (pt, pois, fieldEvents) => {
   if (fe) return { kind: 'waypoint', name: `${fe.id} location`, elev: molaElevationEstimate(pt[0], pt[1]) };
   const wp = FALLBACK_M20_WAYPOINTS.find((w) => samePoint(pt, [w.lat, w.lon]));
   if (wp) return { kind: 'waypoint', name: wp.name, elev: wp.elev };
-  return { kind: 'waypoint', name: 'Waypoint', elev: molaElevationEstimate(pt[0], pt[1]) };
+  return { kind: 'waypoint', name: 'Route waypoint', elev: molaElevationEstimate(pt[0], pt[1]) };
 };
 
 // Route waypoints as a closed EVA loop (HAB → … → HAB). A contingency route (Shelter
@@ -1497,6 +1497,9 @@ export default function MissionPlanner() {
   const [newPoiDraft, setNewPoiDraft] = useState(null);
   // Scientist "Field discoveries" window: its own Leaflet map, separate from the main map
   const [showFieldMap, setShowFieldMap] = useState(false);
+  // Astronaut "EVA briefing" window (printable) and its own Leaflet map
+  const [showBriefing, setShowBriefing] = useState(false);
+  const briefMapContainerRef = useRef(null);
   const [fieldPoiPriority, setFieldPoiPriority] = useState('HIGH');
   const asideRef = useRef(null);
   const fieldMapContainerRef = useRef(null);
@@ -2294,6 +2297,67 @@ export default function MissionPlanner() {
     });
   }, [showFieldMap, mission.fieldEvents, mission.pois, selectedFieldEventId]);
 
+  // EVA briefing map: approved route only, HiRISE, numbered POI flags (lives while the briefing is open)
+  useEffect(() => {
+    const L = window.L;
+    const el = briefMapContainerRef.current;
+    if (!showBriefing || !L || !el) return;
+    const plan =
+      mission.planVersions.find((v) => v.version === mission.activePlanVersion) ?? mission.planVersions[0];
+    const rt = mission.routes[plan.routeId] ?? mission.routes[mission.selectedRoute];
+    const m = routeMetrics[rt.id];
+    if (!m) return;
+    const bmap = L.map(el, {
+      crs: L.CRS.EPSG4326,
+      minZoom: 10,
+      maxZoom: 18,
+      attributionControl: false,
+      zoomControl: false
+    });
+    ['viking', 'ctxGlobal', 'ctxJez', 'hiriseJez'].forEach((id, idx) => {
+      const cfg = JEZERO_RASTER_CATALOG.find((c) => c.id === id);
+      if (cfg) createRasterLayer(L, cfg, 10 + idx).addTo(bmap);
+    });
+    L.polyline(m.path, { color: rt.color, weight: 5, opacity: 0.95 }).addTo(bmap);
+    m.stops
+      .filter((s) => s.kind === 'poi' && !s.skipped)
+      .forEach((s, i) => {
+        const poi = mission.pois.find((p) => p.id === s.poiId);
+        L.marker([s.lat, s.lon], {
+          interactive: false,
+          icon: L.divIcon({
+            className: '',
+            html: `<div class="mh-poi-flag">${flagSvg(POI_FLAG_COLORS[poi?.priority] ?? POI_FLAG_COLORS.LOW, String(i + 1))}</div>`,
+            iconSize: [30, 36],
+            iconAnchor: [5, 34]
+          })
+        }).addTo(bmap);
+      });
+    SHELTERS.forEach((s) =>
+      L.circleMarker([s.lat, s.lon], { radius: 6, color: '#ffffff', weight: 2, fillColor: s.id === 'HAB' ? '#2F6BD8' : '#35B17A', fillOpacity: 1 })
+        .bindTooltip(s.name, { permanent: true, direction: 'right', className: 'syncrowalk-tooltip' })
+        .addTo(bmap)
+    );
+    const fit = () => bmap.fitBounds(m.path, { padding: [30, 30], maxZoom: 16 });
+    fit();
+    let first = true;
+    const ro =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(() => {
+            bmap.invalidateSize();
+            if (first) {
+              first = false;
+              fit();
+            }
+          })
+        : null;
+    ro?.observe(el);
+    return () => {
+      ro?.disconnect();
+      bmap.remove();
+    };
+  }, [showBriefing]);
+
   const openFieldMap = (feId) => {
     if (feId) {
       setSelectedFieldEventId(feId);
@@ -2747,6 +2811,61 @@ export default function MissionPlanner() {
       activePlanVersion: version
     }));
     triggerToast(`Plan ${version} approved: ${short(rt)}. Ready to send to the Astronaut HUD.`);
+  };
+
+  // Astronaut mini-HUD for the APPROVED plan. Demo position: Sol 1 = HAB before egress,
+  // Sol 2 = at POI-4 after the funnel, Sol 3 = divert point when the SEP alert arrives.
+  const astronautHud = () => {
+    const rt = mission.routes[activePlanObj.routeId] ?? mission.routes[mission.selectedRoute];
+    const m = routeMetrics[rt.id];
+    if (!m) return null;
+    let curIdx = 0;
+    if (!sepAlertActive && mission.demoScriptSol >= 2) {
+      const i = m.stops.findIndex((s) => s.poiId === 'POI-4');
+      if (i >= 0) curIdx = i;
+    }
+    const cur = m.stops[curIdx];
+    // Next meaningful stop (POI, shelter or HAB) — plain route waypoints are skipped
+    const next =
+      m.stops.slice(curIdx + 1).find((s) => !s.skipped && s.kind !== 'waypoint') ?? m.stops[m.stops.length - 1];
+    const bearing = bearingDeg([cur.lat, cur.lon], [next.lat, next.lon]);
+    const pois = m.stops.filter((s) => s.kind === 'poi' && !s.skipped);
+    const lastPoi = pois[pois.length - 1] ?? null;
+    const returnLegMin = lastPoi ? lstToMin(m.endLst) - lstToMin(lastPoi.departLst) : 0;
+    const turnBackLst = lastPoi
+      ? addMinutesToLst(mission.timeWindow.latestReturn, -(mission.timeWindow.returnBufferMin + returnLegMin))
+      : null;
+    return { rt, m, cur, next, bearing, dist: Math.max(0, next.distKm - cur.distKm), pois, lastPoi, turnBackLst };
+  };
+
+  // Astronaut "Report anomaly": a new field discovery that flows back to the Scientist
+  // (Field discoveries) and to Mission Control (soft soil slows the route model).
+  const handleReportAnomaly = () => {
+    const hud = astronautHud();
+    const sol = 23 + mission.demoScriptSol;
+    let n = mission.fieldEvents.length + 1;
+    let id = `FE-0${sol}-${String(n).padStart(3, '0')}`;
+    while (mission.fieldEvents.some((f) => f.id === id)) id = `FE-0${sol}-${String(++n).padStart(3, '0')}`;
+    const base = hud?.cur ?? HAB;
+    const fe = {
+      id,
+      ts: `Sol ${sol} · ${hud?.cur?.etaLst ?? mission.timeWindow.suggestedStart} LST`,
+      source: 'Astronaut report (EV1 voice + visorCam)',
+      method: 'manual',
+      class: 'soft-soil',
+      title: 'Unexpected soft soil on the traverse',
+      confidence: 0.6,
+      lat: base.lat + 0.0004,
+      lon: base.lon + 0.0003,
+      photo: `VISORCAM_EV1_${id}`,
+      description: 'Boot sinkage about 8 cm on a crusted sand patch not visible in HiRISE. Crew stopped and probed.',
+      actionDirective: 'Stop and report. Avoid until Mission Control re-evaluates the route.',
+      status: 'needs review',
+      usedInNextPlan: false,
+      promotedPoiId: null
+    };
+    setMission((prev) => ({ ...prev, fieldEvents: [...prev.fieldEvents, fe] }));
+    triggerToast(`${id} reported: sent to the Scientist's field discoveries and to the Mission Control route model.`);
   };
 
   // Profile click → highlight that stretch (contiguous steep / not-evaluated band) on the map
@@ -3982,30 +4101,80 @@ export default function MissionPlanner() {
           {/* ═══════════════════════════ ROLE 3: ASTRONAUT HUD ═══════════════════════════ */}
           {currentRole === 'astronaut' && (
             <>
-              <section
-                className={`p-5 sm:p-6 rounded-mh-lg shadow-mh flex flex-col gap-4 ${
-                  sepAlertActive ? 'bg-mh-crit-bg' : 'bg-mh-card'
-                }`}
-                aria-live="polite"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className={`mh-pill ${sepAlertActive ? 'mh-pill--crit' : 'mh-pill--ok'}`}>
-                    {sepAlertActive ? 'SEP alert: go to shelter' : 'On plan'}
-                  </span>
-                  <span className="text-base font-semibold">
-                    Light 02:10 · Buffer {mission.routes[mission.selectedRoute]?.bufferMin} min
-                  </span>
-                </div>
-                <p className="m-0 text-lg font-semibold">{activePlanObj.diffSummary}</p>
-                <button
-                  type="button"
-                  onClick={handleToggleHudLocalZoom}
-                  className="mh-btn mh-btn--tinted mh-btn--lg mh-btn--block !min-h-16"
-                >
-                  <Crosshair className="w-5 h-5" />
-                  <span>{hudLocalZoom ? 'Back to sector view' : '1:250 target zoom'}</span>
-                </button>
-              </section>
+              {(() => {
+                const hud = astronautHud();
+                if (!hud) return null;
+                const A = DEMO_ASSUMPTIONS;
+                return (
+                  <section
+                    className={`p-5 sm:p-6 rounded-mh-lg shadow-mh flex flex-col gap-4 shrink-0 ${
+                      sepAlertActive ? 'bg-mh-crit-bg' : 'bg-mh-card'
+                    }`}
+                    aria-live="polite"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`mh-pill ${sepAlertActive ? 'mh-pill--crit' : 'mh-pill--ok'}`}>
+                        {sepAlertActive ? 'SEP alert: go to shelter now' : 'On plan'}
+                      </span>
+                      <span className="text-base font-semibold">
+                        Plan {mission.activePlanVersion} · {hud.rt.name.split('(')[0].trim()}
+                      </span>
+                    </div>
+                    <p className="m-0 text-lg font-semibold">{activePlanObj.diffSummary}</p>
+
+                    {/* Mini-HUD: only what the crew needs now */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="mh-tile !gap-0.5">
+                        <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-mh-text2">Next waypoint</span>
+                        <strong className="text-[18px] leading-tight">{hud.next.name}</strong>
+                        <span className="text-base">
+                          {hud.dist.toFixed(2)} km · {compassPoint(hud.bearing)} {Math.round(hud.bearing)}°
+                        </span>
+                      </div>
+                      <div className="mh-tile !gap-0.5">
+                        <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-mh-text2">Turn back by</span>
+                        <strong className="text-[26px] leading-tight">{hud.turnBackLst ?? 'Now'}</strong>
+                        <span className="text-base text-mh-text2">
+                          {hud.lastPoi ? `Leave ${hud.lastPoi.poiId} (planned ${hud.lastPoi.departLst})` : 'Divert to shelter'}
+                        </span>
+                      </div>
+                      <div className="mh-tile !gap-0.5">
+                        <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-mh-text2">Return buffer</span>
+                        <strong className="text-[26px] leading-tight">{hud.m.bufferMin} min</strong>
+                        <span className="text-base text-mh-text2">
+                          Min {mission.timeWindow.returnBufferMin} · in HAB {hud.m.endLst}
+                        </span>
+                      </div>
+                      <div className="mh-tile !gap-0.5">
+                        <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-mh-text2">EVA dose</span>
+                        <strong className="text-[26px] leading-tight">{hud.m.doseEvaMsv.toFixed(2)} mSv</strong>
+                        <span className="flex flex-wrap items-center gap-1.5 text-base text-mh-text2">
+                          Limit {A.evaDoseLimitMsv} mSv <SimBadge />
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowBriefing(true)}
+                        className="mh-btn mh-btn--primary mh-btn--lg !min-h-14"
+                      >
+                        <FileJson className="w-5 h-5" />
+                        <span>EVA briefing</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleToggleHudLocalZoom}
+                        className="mh-btn mh-btn--tinted mh-btn--lg !min-h-14"
+                      >
+                        <Crosshair className="w-5 h-5" />
+                        <span>{hudLocalZoom ? 'Sector view' : 'Target zoom'}</span>
+                      </button>
+                    </div>
+                  </section>
+                );
+              })()}
 
               <Card
                 eyebrow="Handheld funnel · 12 min on-site"
@@ -4059,18 +4228,24 @@ export default function MissionPlanner() {
                   })}
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => handleRunRapidFunnelAndPromote('FE-024-003')}
-                  className="mh-btn mh-btn--primary mh-btn--lg mh-btn--block !min-h-16"
-                >
-                  <Zap className="w-5 h-5 shrink-0" />
-                  <span>
-                    {isRunningFunnelAnim
-                      ? 'Updating posterior…'
-                      : 'Log funnel reading & update map'}
-                  </span>
-                </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleRunRapidFunnelAndPromote('FE-024-003')}
+                    className="mh-btn mh-btn--primary mh-btn--lg !min-h-16"
+                  >
+                    <Zap className="w-5 h-5 shrink-0" />
+                    <span>{isRunningFunnelAnim ? 'Updating posterior…' : 'Log measurement'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleReportAnomaly}
+                    className="mh-btn mh-btn--danger mh-btn--lg !min-h-16"
+                  >
+                    <AlertTriangle className="w-5 h-5 shrink-0" />
+                    <span>Report anomaly</span>
+                  </button>
+                </div>
               </Card>
 
               <Card
@@ -4282,6 +4457,224 @@ export default function MissionPlanner() {
           </div>
         );
       })()}
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+          EVA BRIEFING (Astronaut): approved plan only — printable (window.print)
+         ═══════════════════════════════════════════════════════════════════════ */}
+      {showBriefing &&
+        (() => {
+          const hud = astronautHud();
+          if (!hud) return null;
+          const A = DEMO_ASSUMPTIONS;
+          const { m, rt } = hud;
+          const sol = 23 + mission.demoScriptSol;
+          const evCrew = CREW_ROSTER.filter((c) => c.onEva);
+          const iv = CREW_ROSTER.find((c) => !c.onEva);
+          const habPt = [HAB.lat, HAB.lon];
+          // Comms (demo model): beyond ~0.75 km the ridge blocks the direct link → relay via the rover
+          const relays = m.stops
+            .slice(1)
+            .map((s, i) => ({ a: m.stops[i], b: s }))
+            .filter(
+              ({ a, b }) =>
+                Math.max(distKm([a.lat, a.lon], habPt), distKm([b.lat, b.lon], habPt)) > 0.75
+            );
+          return (
+            <div
+              className="mh-print-overlay fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6"
+              onClick={() => setShowBriefing(false)}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="briefing-title"
+                onClick={(e) => e.stopPropagation()}
+                className="mh-print-root bg-mh-card rounded-mh-lg shadow-mh w-full max-w-[1100px] h-[92vh] flex flex-col overflow-hidden select-text"
+              >
+                <div className="px-5 py-4 flex flex-wrap items-start justify-between gap-3 border-b border-mh-sep shrink-0">
+                  <div className="flex flex-col gap-1 min-w-0">
+                    <span className="mh-eyebrow mh-eyebrow--line">EVA briefing</span>
+                    <h2 id="briefing-title" className="m-0 text-[24px] leading-tight font-bold">
+                      EVA Briefing — Sol {sol} · Plan {mission.activePlanVersion}
+                    </h2>
+                    <p className="m-0 text-base text-mh-text2">
+                      Approved by {activePlanObj.approvedBy} · {activePlanObj.ts}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 mh-no-print">
+                    <button type="button" onClick={() => window.print()} className="mh-btn mh-btn--tinted">
+                      Print
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowBriefing(false)}
+                      className="mh-btn mh-btn--icon bg-mh-fill text-mh-text shrink-0"
+                      aria-label="Close briefing"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mh-print-scroll flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-5">
+                  {/* Team + objective */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="mh-tile md:col-span-2">
+                      <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">Objective</span>
+                      <strong className="text-[18px]">{mission.objective}</strong>
+                      <span className="text-base">
+                        {rt.name.split('(')[0].trim()} · {m.distanceKm.toFixed(2)} km · out {m.startLst} → back in HAB{' '}
+                        {m.endLst} LST
+                      </span>
+                    </div>
+                    <div className="mh-tile">
+                      <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">Team</span>
+                      {evCrew.map((c) => (
+                        <span key={c.id} className="text-base">
+                          <strong>{c.id}</strong> · {c.name}
+                        </span>
+                      ))}
+                      {iv && (
+                        <span className="text-base">
+                          <strong>IV</strong> · {iv.name} (in HAB)
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Route map: approved route only */}
+                  <div className="rounded-mh-md overflow-hidden border border-mh-sep h-[320px] shrink-0 break-inside-avoid">
+                    <div ref={briefMapContainerRef} className="w-full h-full" />
+                  </div>
+
+                  {/* Hard limits */}
+                  <section className="rounded-mh-md border-2 border-[#E5484D] p-4 flex flex-col gap-2 break-inside-avoid" aria-label="Hard limits">
+                    <span className="mh-eyebrow">Hard limits</span>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                      <Stat label="Turn back by" value={hud.turnBackLst ? `${hud.turnBackLst} LST` : 'Divert now'} />
+                      <Stat label="Latest return" value={`${mission.timeWindow.latestReturn} LST`} />
+                      <Stat label="Minimum buffer" value={`${mission.timeWindow.returnBufferMin} min`} />
+                      <Stat label="Max time to shelter" value={`${A.sepMinWarningMin} min (route ${Math.round(m.maxTimeToShelterMin)})`} />
+                      <Stat label="Max EVA dose" value={`${A.evaDoseLimitMsv} mSv (plan ${m.doseEvaMsv.toFixed(2)})`} />
+                      <Stat label="Slope limit" value={`${A.slopeLimitDeg}° (route ${m.maxSlopeDeg.toFixed(1)}°)`} />
+                    </div>
+                  </section>
+
+                  {/* Timeline */}
+                  <section className="flex flex-col gap-2" aria-label="Timeline">
+                    <span className="mh-eyebrow">
+                      <Clock className="w-4 h-4" aria-hidden="true" />
+                      Timeline (LST)
+                    </span>
+                    <ol className="m-0 p-0 list-none flex flex-col gap-2">
+                      {m.stops
+                        .filter((s) => !s.skipped)
+                        .map((s, i) => {
+                          const poi = s.poiId ? mission.pois.find((p) => p.id === s.poiId) : null;
+                          const h = poi ? getHydration(poi) : null;
+                          return (
+                            <li key={`${s.name}-${i}`} className="mh-tile !gap-2 break-inside-avoid">
+                              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                                <span className="font-mono text-[16px] font-medium">{s.etaLst}</span>
+                                <strong className="text-base">{s.name}</strong>
+                                {poi && <span className="text-base text-mh-text2">{s.stationMin} min on site · leave {s.departLst}</span>}
+                                {s.kind === 'start' && <span className="text-base text-mh-text2">Egress · leave {s.departLst}</span>}
+                                {s.kind === 'hab' && <span className="text-base text-mh-text2">Ingress · EVA ends {m.endLst}</span>}
+                              </div>
+                              {poi && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                  <div className="flex flex-col gap-1 text-base">
+                                    <span>
+                                      <strong>Task:</strong> 12-min funnel, then sampling ({poi.feature}).
+                                    </span>
+                                    <span>
+                                      <strong>Tools:</strong> SuperCam → abrader → PIXL/SHERLOC (12 min)
+                                    </span>
+                                    <span>
+                                      <strong>Photograph:</strong> context panorama, abrasion patch with scale bar, vein
+                                      or layer contacts.
+                                    </span>
+                                  </div>
+                                  {h?.prior && (
+                                    <ValueWithUncertainty
+                                      label="Measure: hydration (replace the orbital estimate)"
+                                      value={h.prior.value}
+                                      sigma={h.prior.sigma}
+                                      unit="wt% H₂O"
+                                      kind="prior"
+                                      source="MRO · CRISM · 18 m/px"
+                                    />
+                                  )}
+                                </div>
+                              )}
+                            </li>
+                          );
+                        })}
+                    </ol>
+                  </section>
+
+                  {/* Abort rules */}
+                  <section className="flex flex-col gap-2" aria-label="Abort rules">
+                    <span className="mh-eyebrow">Abort rules</span>
+                    <ul className="m-0 p-0 list-none grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {[
+                        ['SEP alert received?', 'Go to the nearest shelter now (HAB or alcove).'],
+                        [`Dust τ > ${A.tauVisibilityDegraded} or visibility lost?`, 'Return to HAB.'],
+                        [`Dosimeter above ${A.evaDoseLimitMsv} mSv?`, 'Return to HAB.'],
+                        [`Suit consumables below ${A.suitReservePct}% reserve?`, 'Return to HAB.'],
+                        ['Unexpected soft terrain?', 'Stop, probe, use “Report anomaly”.']
+                      ].map(([q, a]) => (
+                        <li key={q} className="mh-tile !gap-0.5">
+                          <span className="text-base font-semibold">{q}</span>
+                          <span className="text-base">
+                            <strong className="text-mh-crit">Yes →</strong> {a}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+
+                  {/* Comms */}
+                  <section className="flex flex-col gap-2" aria-label="Comms">
+                    <span className="mh-eyebrow">
+                      Comms <SimBadge />
+                    </span>
+                    <ul className="m-0 pl-5 flex flex-col gap-1 text-base">
+                      <li>
+                        IV {iv?.name} on the HAB console. Check in at every stop arrival and every 15 min.
+                      </li>
+                      {relays.length ? (
+                        relays.map(({ a, b }) => (
+                          <li key={`${a.name}-${b.name}`}>
+                            {a.departLst}–{b.etaLst}: no direct link to HAB ({a.name} → {b.name}). Relay via rover.
+                          </li>
+                        ))
+                      ) : (
+                        <li>Direct link to HAB along the whole route.</li>
+                      )}
+                    </ul>
+                  </section>
+
+                  {/* Mini-HUD actions: field data flows back to the Scientist */}
+                  <section className="flex flex-wrap gap-2 mh-no-print" aria-label="Field actions">
+                    <button
+                      type="button"
+                      onClick={() => handleRunRapidFunnelAndPromote('FE-024-003')}
+                      className="mh-btn mh-btn--primary"
+                    >
+                      <Zap className="w-5 h-5" />
+                      <span>Log measurement</span>
+                    </button>
+                    <button type="button" onClick={handleReportAnomaly} className="mh-btn mh-btn--danger">
+                      <AlertTriangle className="w-5 h-5" />
+                      <span>Report anomaly</span>
+                    </button>
+                  </section>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
       {/* ═══════════════════════════════════════════════════════════════════════
           EVIDENCE & PDS SOURCES SLIDE-OVER DRAWER
