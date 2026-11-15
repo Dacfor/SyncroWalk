@@ -29,6 +29,8 @@ import EvaBriefing from './planner/Briefing.tsx';
 import EvaDebrief from './planner/Debrief.tsx';
 import { SCENARIOS, scenarioById } from './planner/scenarios/index.ts';
 import { COMPOSITION_LAYERS, CompositionMenu, compositionLayer } from './planner/LayerMenus.tsx';
+import { fetchThemisCatalog, loadThemisCrop, sampleCrop } from './planner/themis.ts';
+import ThemisTemperaturePanel, { formatTemp } from './planner/ThemisTemperature.tsx';
 import { BASE, FIELD_EVENT_META, PRIORITY_META, instrumentName, isHazard, pastEvaPath, planFor, solDate } from './planner/model.ts';
 import {
   DEMO_ASSUMPTIONS,
@@ -337,6 +339,7 @@ const createRasterLayer = (L, cfg, zIndex) =>
 const DEFAULT_FILTERS = {
   filter1_spectralFusion: false, // TES clay + CRISM prior zones vs in-situ posterior rings
   filter2_thermalInertia: false, // THEMIS night IR
+  themisTemp: false, // THEMIS calibrated surface temperature (single passes, real K values)
   filter3_pdsTargetsTraverse: false, // Perseverance traverse + waypoints (MMGIS / PDS)
   uncertainty: false, // 1σ veil of the orbital estimate, in-situ rings, residual halos
   reachable: false, // area within a 40-min walk of a shelter (SEP rule)
@@ -352,6 +355,7 @@ const DEFAULT_FILTERS = {
 // Layer toggles offered to each role in the map header: [filter key, label, hint]
 const L_FUSION = ['filter1_spectralFusion', 'CRISM prior ↔ PDS posterior', 'Orbital CRISM/TES mineral zones (prior) vs. rings measured in situ by PIXL/SHERLOC (posterior)'];
 const L_THERMAL = ['filter2_thermalInertia', 'THEMIS thermal (100 m)', 'THEMIS night IR, red–blue colormap: red = warm/high thermal inertia (bedrock), blue = cold (loose sand & dust)'];
+const L_TEMP = ['themisTemp', 'Surface temperature', 'Real surface temperature from single THEMIS passes (Kelvin, ~100 m/px), blue = cold, red = warm. Hover or click the map to read the local °C'];
 const L_TRAVERSE = ['filter3_pdsTargetsTraverse', 'Perseverance traverse (PDS)', 'Perseverance rover traverse (orange line) and its Sol waypoints from MMGIS/PDS'];
 const L_UNCERTAINTY = ['uncertainty', 'Uncertainty', '1σ of the mineralogy layer: a dense grey veil means an uncertain orbital estimate; green rings are in-situ measurements; halos show the residual vs the orbital prior'];
 const L_REACHABLE = ['reachable', 'Reachable area', 'Area within a 40-min walk of a shelter: what an EVA can reach under the SEP rule'];
@@ -361,8 +365,8 @@ const L_SHELTERS = ['shelters', 'Shelters & 40-min ring', 'SEP shelters and the 
 const L_HISTORY = ['routeHistory', 'Route history', 'Past EVA tracks coloured by outcome (completed / partial / aborted). Click a track for date, pair, real vs planned duration and POIs reached'];
 const L_VALIDATED = ['validatedTerrain', 'Validated terrain', 'Trafficability validated in situ on the stretches the crew has walked (from the EVA debriefs)'];
 const LAYER_TOGGLES = {
-  scientist: [L_FUSION, L_THERMAL, L_TRAVERSE, L_UNCERTAINTY, L_REACHABLE, L_HISTORY, L_VALIDATED],
-  control: [L_SLOPE, L_HAZARDS, L_SHELTERS, L_HISTORY, L_VALIDATED, L_TRAVERSE],
+  scientist: [L_FUSION, L_THERMAL, L_TEMP, L_TRAVERSE, L_UNCERTAINTY, L_REACHABLE, L_HISTORY, L_VALIDATED],
+  control: [L_SLOPE, L_HAZARDS, L_SHELTERS, L_TEMP, L_HISTORY, L_VALIDATED, L_TRAVERSE],
   // Astronaut: no science layers (CRISM / mineralogy, Perseverance / PDS). Only what helps on the
   // ground: high-resolution base, approved route, POIs of the day, hazards, shelters + 40-min ring.
   astronaut: [
@@ -772,6 +776,80 @@ export default function MissionPlanner() {
       isMounted = false;
     };
   }, []);
+
+  // ── THEMIS surface temperature (real data): catalogue → selected pass → crop over Jezero ──
+  const themisOn = activeFilters.themisTemp && currentRole !== 'astronaut';
+  const [themisCatalog, setThemisCatalog] = useState([]);
+  const [themisCatalogError, setThemisCatalogError] = useState(null);
+  const [themisObsId, setThemisObsId] = useState(null);
+  const [themisCrop, setThemisCrop] = useState(null);
+  const [themisLoading, setThemisLoading] = useState(false);
+  const [themisError, setThemisError] = useState(null);
+  const themisCacheRef = useRef(new Map());
+  const themisOverlayRef = useRef(null);
+
+  // Catalogue (ODE REST API, CORS-enabled): fetched once, the first time the layer is switched on.
+  // Default pass: the most recent one.
+  useEffect(() => {
+    if (!themisOn || themisCatalog.length || themisCatalogError) return;
+    const ctrl = new AbortController();
+    fetchThemisCatalog(ctrl.signal)
+      .then((list) => {
+        setThemisCatalog(list);
+        if (list.length) setThemisObsId((id) => id ?? list[list.length - 1].id);
+        else setThemisCatalogError('no THEMIS pass over the work area');
+      })
+      .catch((e) => e.name !== 'AbortError' && setThemisCatalogError(String(e.message || e)));
+    return () => ctrl.abort();
+  }, [themisOn]);
+
+  // Selected pass → temperature grid over Jezero (PDS file read through the Vite proxy)
+  useEffect(() => {
+    setThemisError(null);
+    const obs = themisCatalog.find((o) => o.id === themisObsId);
+    if (!themisOn || !obs) return;
+    const cached = themisCacheRef.current.get(obs.id);
+    if (cached) {
+      setThemisCrop(cached);
+      return;
+    }
+    const ctrl = new AbortController();
+    setThemisCrop(null);
+    setThemisLoading(true);
+    loadThemisCrop(obs, ctrl.signal)
+      .then((crop) => {
+        themisCacheRef.current.set(obs.id, crop);
+        setThemisCrop(crop);
+      })
+      .catch((e) => {
+        if (e.name === 'AbortError') return;
+        setThemisError(
+          /404|Failed to fetch|NetworkError|Unexpected THEMIS label/.test(String(e.message))
+            ? `${e.message}. The THEMIS files are read through the Vite proxy: run the app with "npm run dev" or "npm run preview".`
+            : String(e.message || e)
+        );
+      })
+      .finally(() => setThemisLoading(false));
+    return () => ctrl.abort();
+  }, [themisOn, themisObsId, themisCatalog]);
+
+  // Draw / remove the temperature image overlay
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    const L = window.L;
+    themisOverlayRef.current?.remove();
+    themisOverlayRef.current = null;
+    if (!map || !L || !themisCrop || !themisOn) return;
+    themisOverlayRef.current = L.imageOverlay(themisCrop.dataUrl, themisCrop.bounds, {
+      opacity: 0.85,
+      className: 'mh-pixelated',
+      interactive: false,
+      zIndex: 350
+    }).addTo(map);
+  }, [themisCrop, themisOn, mapReady]);
+
+  // Temperature at the clicked point (map footer), NaN outside the pass or where it has no data
+  const clickedTempK = themisOn && themisCrop ? sampleCrop(themisCrop, clickedPoint.lat, clickedPoint.lon) : NaN;
 
   // Live Perseverance traverse (MMGIS). mars.nasa.gov sends no CORS header, so the browser can
   // only read it through the local FastAPI proxy: it is fetched once, when the proxy is on and the
@@ -1768,6 +1846,19 @@ export default function MissionPlanner() {
               showFe={(currentRole !== 'scientist' && activeFilters.hazards && planner.state.fieldEvents.some(isHazard)) || (currentRole === 'scientist' && !!shownFeId)}
             />
 
+            {themisOn && (
+              <ThemisTemperaturePanel
+                map={mapReady ? mapInstanceRef.current : null}
+                catalog={themisCatalog}
+                catalogError={themisCatalogError}
+                obsId={themisObsId}
+                onObsChange={setThemisObsId}
+                crop={themisCrop}
+                loading={themisLoading}
+                error={themisError}
+              />
+            )}
+
             {pickMode && (
               <div className="absolute top-[4.25rem] left-3 z-20 mh-alert !py-2 shadow-mh max-w-[calc(100%-5rem)]" role="status">
                 <Crosshair className="w-4 h-4 shrink-0" aria-hidden="true" />
@@ -1829,6 +1920,17 @@ export default function MissionPlanner() {
               <span className="text-base">
                 MOLA <strong>{clickedPoint.molaElevationM} m</strong>
               </span>
+              {themisOn && themisCrop && (
+                <span className="text-base" title="THEMIS surface temperature at this point, for the selected pass">
+                  {Number.isNaN(clickedTempK) ? (
+                    <span className="text-mh-text2">T: outside the THEMIS pass</span>
+                  ) : (
+                    <>
+                      T <strong className="font-mono">{formatTemp(clickedTempK)}</strong>
+                    </>
+                  )}
+                </span>
+              )}
               {currentRole !== 'astronaut' && (
                 <span className="text-base text-mh-text2" title="Nearest Perseverance waypoint (PDS)">
                   M20 Sol {clickedPoint.nearestSol} · {clickedPoint.distanceKm.toFixed(2)} km
