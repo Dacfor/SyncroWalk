@@ -36,22 +36,32 @@ Switching role never reloads the map. Each role sees only the layers and tools i
 
 ---
 
+## Demo
+
+[![SyncroWalk demo: Sol 58, end of campaign](screenshot/demo.gif)](https://youtu.be/exAY5rXpp4o)
+
+▶️ **[Watch the full 80-second demo on YouTube](https://youtu.be/exAY5rXpp4o)**
+
+A hub lab result re-opens a low-priority target, the Sol 59 plan goes NO-GO on crew dose, and SyncroWalk re-plans it with the other EVA pair before the astronauts open their briefing.
+
+---
+
 ## Screenshots
 
-<table>
-  <tr>
-    <td align="center"><b>Scientist</b></td>
-    <td align="center"><b>Mission Control</b></td>
-    <td align="center"><b>Astronaut</b></td>
-  </tr>
-  <tr>
-    <td><a href="screenshot/Scientist.png"><img src="screenshot/Scientist.png" alt="Scientist view" /></a></td>
-    <td><a href="screenshot/MissionControl.png"><img src="screenshot/MissionControl.png" alt="Mission Control view" /></a></td>
-    <td><a href="screenshot/Astronunt.png"><img src="screenshot/Astronunt.png" alt="Astronaut view" /></a></td>
-  </tr>
-</table>
+### Scientist
+Points of interest, field discoveries and hypotheses on the shared map.
 
-<sub>Click an image to open it at full size.</sub>
+![Scientist view](screenshot/Scientist.png)
+
+### Mission Control
+Route planning, GO / NO-GO check, crew dose and replanning.
+
+![Mission Control view](screenshot/MissionControl.png)
+
+### Astronaut
+The day's EVA, targets, equipment and the printable briefing.
+
+![Astronaut view](screenshot/Astronunt.png)
 
 ---
 
@@ -200,6 +210,17 @@ Pick a scenario from the top bar to load a complete mission history:
 | **Sol 3 · Early ops** | The first two EVAs have been debriefed. A soft-soil report moved a route and a new POI was promoted. |
 | **Sol 20 · Advanced ops** | 16 EVAs: route history, terrain validated in situ, two SEP events, one astronaut out of dose budget. |
 | **Sol 24 · Live ops** *(default)* | A plan has been sent, the next day's draft is NO-GO and there is an SEP drill in Mission Control. |
+| **Sol 58 · End of campaign** | A hub lab result on a Sol 41 sample re-opens a low-priority target. The Sol 59 plan goes NO-GO on crew dose and is re-planned with the other EVA pair. |
+
+### Scripted demo (80 seconds)
+
+Open **http://localhost:5173/?demo=sol58**, or choose **Play the scripted demo · Sol 58** in the scenario menu. The demo plays the Sol 58 story on its own in 11 steps, using the same actions as the buttons: lab result → priority change → NO-GO → crew dose check → replan → approval → astronaut briefing.
+
+| Key | Action |
+| :--- | :--- |
+| `Space` | Pause / resume |
+| `→` | Next step |
+| `Esc` | Stop the demo |
 
 Use **Reset demo** in the user menu to restore the starting data. The mission state is saved in the browser (`localStorage`).
 
