@@ -15,14 +15,14 @@ const STEP_LABEL: Record<ReplanStepCode, string> = {
 };
 
 const verdict = (s: PlanSummary) =>
-  s.overall === 'violated' ? { label: 'NO-GO', cls: 'mh-pill--crit' } : s.overall === 'watch' ? { label: 'GO · watch', cls: 'mh-pill--caution' } : { label: 'GO', cls: 'mh-pill--ok' };
+  s.overall === 'violated' ? { label: 'NO-GO', cls: 'mh-pill--crit' } : s.overall === 'watch' ? { label: 'GO · watch', cls: 'mh-pill--warn' } : { label: 'GO', cls: 'mh-pill--ok' };
 
 export function ReplanSteps({ steps }: { steps: ReplanStep[] }) {
   if (!steps.length) return null;
   return (
     <ol className="m-0 p-0 list-none flex flex-col gap-1.5">
       {steps.map((st, i) => (
-        <li key={i} className="flex items-start gap-1.5 text-base">
+        <li key={i} className="flex items-start gap-2 text-base">
           <span className="mh-step-code shrink-0">{STEP_LABEL[st.code]}</span>
           <span>{st.text}</span>
         </li>
@@ -98,11 +98,11 @@ export function ReplanCard({
   footer?: string;
 }) {
   return (
-    <section className="mh-replan flex flex-col gap-2" aria-label={title}>
-      <div className="flex flex-wrap items-center gap-1.5">
-        {onApply ? <Wand2 className="w-4 h-4 shrink-0" aria-hidden="true" /> : <GitBranch className="w-4 h-4 shrink-0" aria-hidden="true" />}
-        <strong className="text-[13px]">{title}</strong>
-        <span className="font-mono text-[12px] text-mh-text2 flex items-center gap-1">
+    <section className="mh-replan flex flex-col gap-3" aria-label={title}>
+      <div className="flex flex-wrap items-center gap-2">
+        {onApply ? <Wand2 className="w-5 h-5 shrink-0" aria-hidden="true" /> : <GitBranch className="w-5 h-5 shrink-0" aria-hidden="true" />}
+        <strong className="text-[17px]">{title}</strong>
+        <span className="font-mono text-[13px] text-mh-text2 flex items-center gap-1">
           v{fromVersion} <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" /> v{toVersion}
         </span>
         <SimBadge label="demo model" />
@@ -115,9 +115,9 @@ export function ReplanCard({
           <ReplanSteps steps={steps} />
           <ReplanCompare before={before} after={after} fromVersion={fromVersion} toVersion={toVersion} />
           {onApply && (
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-3">
               <button type="button" className="mh-btn mh-btn--primary" onClick={onApply}>
-                <Wand2 className="w-4 h-4" /> Apply replan
+                <Wand2 className="w-5 h-5" /> Apply replan
               </button>
               <span className="text-base text-mh-text2">Creates plan v{toVersion} and writes the reason in the mission log. It still needs approval.</span>
             </div>

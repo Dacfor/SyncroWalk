@@ -118,7 +118,7 @@ export default function EvaDebrief({
   };
 
   return (
-    <div className="fixed inset-0 z-[1200] bg-black/60 flex items-center justify-center p-2 sm:p-3" onClick={onClose}>
+    <div className="fixed inset-0 z-[1200] bg-black/60 flex items-center justify-center p-3 sm:p-6" onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"
@@ -126,9 +126,9 @@ export default function EvaDebrief({
         onClick={(e) => e.stopPropagation()}
         className="mh-window bg-mh-card w-full max-w-[980px] h-[94vh] flex flex-col overflow-hidden select-text"
       >
-        <div className="px-3 py-2 flex items-start justify-between gap-2 border-b border-mh-sep shrink-0">
+        <div className="px-5 py-3 flex items-start justify-between gap-3 border-b border-mh-sep shrink-0">
           <div className="flex flex-col gap-1 min-w-0">
-            <h2 id="debrief-title" className="m-0 text-[15px] leading-tight font-bold">
+            <h2 id="debrief-title" className="m-0 text-[22px] leading-tight font-bold">
               EVA Debrief · Sol {mission.sol}
             </h2>
             <p className="m-0 text-base text-mh-text2">
@@ -137,20 +137,20 @@ export default function EvaDebrief({
             </p>
           </div>
           <button type="button" onClick={onClose} className="mh-btn mh-btn--icon bg-mh-fill text-mh-text shrink-0" aria-label="Close debrief">
-            <X className="w-4 h-4" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-3">
+        <div className="flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-5">
           {/* Per POI */}
           <section aria-label="Targets">
             <H>Targets</H>
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-3">
               {pois.map((x, i) => {
                 const poi = plan.stops[i];
                 return (
                   <div key={x.poiId} className="mh-debrief-poi">
-                    <div className="flex flex-wrap items-center justify-between gap-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <strong className="text-base">
                         {x.poiId} · {poi?.name}
                       </strong>
@@ -166,8 +166,8 @@ export default function EvaDebrief({
                       <div className="flex flex-col gap-1">
                         <span className="mh-field-label">Samples collected</span>
                         {x.samples.map((sm, k) => (
-                          <div key={sm.id} className="flex items-center gap-1.5">
-                            <label className="flex items-center gap-1.5 shrink-0 w-28 font-mono text-[12px] cursor-pointer">
+                          <div key={sm.id} className="flex items-center gap-2">
+                            <label className="flex items-center gap-2 shrink-0 w-28 font-mono text-[13px] cursor-pointer">
                               <input
                                 type="checkbox"
                                 checked={sm.collected}
@@ -195,7 +195,7 @@ export default function EvaDebrief({
                         placeholder="What you saw that the plan did not expect"
                       />
                     </label>
-                    <label className="flex items-center gap-1.5 text-base cursor-pointer">
+                    <label className="flex items-center gap-2 text-base cursor-pointer">
                       <input type="checkbox" checked={x.proposePoi} onChange={(e) => setPoi(i, { proposePoi: e.target.checked })} />
                       Propose a new POI here (sent to the Scientist)
                     </label>
@@ -210,7 +210,7 @@ export default function EvaDebrief({
             <H>Terrain trafficability vs predicted</H>
             <div className="flex flex-col gap-1.5">
               {legs.map((l, i) => (
-                <div key={`${l.from}-${l.to}-${i}`} className="flex flex-wrap items-center justify-between gap-1.5">
+                <div key={`${l.from}-${l.to}-${i}`} className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-base">
                     <span className="font-mono text-mh-text2">Leg {i + 1}</span> · {l.from} → {l.to}
                   </span>
@@ -226,11 +226,11 @@ export default function EvaDebrief({
             <p className="m-0 mt-2 text-base text-mh-text2">Updates the walking speed of the route model on these stretches (easier +15 %, harder −30 %).</p>
           </section>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {/* Exertion and workload */}
             <section aria-label="Exertion and workload">
               <H>Exertion and workload</H>
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-3">
                 <label className="mh-field">
                   <span>
                     Perceived exertion (Borg 6–20): <strong className="font-mono">{borg}</strong> · {borgLabel(borg)}
@@ -261,12 +261,12 @@ export default function EvaDebrief({
             {/* Suit, dust, dose */}
             <section aria-label="Suit and dose">
               <H>Suit, dust, dose</H>
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-3">
                 <label className="mh-field">
                   <span>Suit issues</span>
                   <textarea className="mh-input min-h-16 resize-y" value={suitIssues} onChange={(e) => setSuitIssues(e.target.value)} placeholder="None, or e.g. left glove stiff, visor fogging" />
                 </label>
-                <div className="flex flex-wrap items-center justify-between gap-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="mh-field-label">Dust on suit and seals</span>
                   <Choice
                     label="Dust"
@@ -279,7 +279,7 @@ export default function EvaDebrief({
                     ]}
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-3">
                   <label className="mh-field">
                     <span>Dosimeter reading (mSv)</span>
                     <input className="mh-input font-mono" inputMode="decimal" value={dosimeter} onChange={(e) => setDosimeter(e.target.value)} />
@@ -296,7 +296,7 @@ export default function EvaDebrief({
           {/* Signature */}
           <section aria-label="Signature">
             <H>Signature</H>
-            <div className="grid grid-cols-1 sm:grid-cols-[1fr_180px_auto] gap-2 items-end">
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_180px_auto] gap-3 items-end">
               <label className="mh-field">
                 <span>Name</span>
                 <input className="mh-input" value={signedBy} onChange={(e) => setSignedBy(e.target.value)} />

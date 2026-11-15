@@ -67,19 +67,19 @@ export default function AstronautPanel({
 
   // Which Sol the views refer to, with shortcuts back to today / to the calendar
   const dayBar = (
-    <div className="bg-mh-card rounded-mh-lg shadow-mh px-3 py-2 flex flex-wrap items-center justify-between gap-1.5">
+    <div className="bg-mh-card rounded-mh-lg shadow-mh px-5 py-3 flex flex-wrap items-center justify-between gap-2">
       <span className="text-base">
         Showing <strong>Sol {selectedSol}</strong>
         {isToday ? ' · Today' : ''}
       </span>
-      <span className="flex flex-wrap gap-1.5">
+      <span className="flex flex-wrap gap-2">
         {!isToday && (
-          <button type="button" className="mh-btn mh-btn--tinted !min-h-7" onClick={() => setSelectedSol(state.todaySol)}>
+          <button type="button" className="mh-btn mh-btn--tinted !min-h-11" onClick={() => setSelectedSol(state.todaySol)}>
             Back to today
           </button>
         )}
-        <button type="button" className="mh-btn mh-btn--plain !min-h-7" onClick={() => setView('calendar')}>
-          <CalendarDays className="w-4 h-4" /> Change day
+        <button type="button" className="mh-btn mh-btn--plain !min-h-11" onClick={() => setView('calendar')}>
+          <CalendarDays className="w-5 h-5" /> Change day
         </button>
       </span>
     </div>
@@ -107,7 +107,7 @@ export default function AstronautPanel({
       {view === 'calendar' && (
         <TabPanel id="calendar">
           <Card eyebrow="From mission control" title="Mission calendar" icon={CalendarDays}>
-            <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Mission day">
+            <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Mission day">
               {sols.map((sol) => {
                 const m = visible.find((x) => x.sol === sol);
                 const sel = sol === selectedSol;
@@ -121,7 +121,7 @@ export default function AstronautPanel({
                       setSelectedSol(sol);
                       setView('schedule');
                     }}
-                    className={`min-h-7 px-2.5 py-2 rounded-mh-md border-2 text-left cursor-pointer flex flex-col ${
+                    className={`min-h-11 px-4 py-2 rounded-mh-md border-2 text-left cursor-pointer flex flex-col ${
                       sel ? 'bg-mh-fill-blue border-mh-primary text-mh-text' : 'bg-mh-fill border-transparent text-mh-text'
                     }`}
                   >
@@ -156,10 +156,10 @@ export default function AstronautPanel({
             <>
               {view === 'schedule' && hud && (
                 <section
-                  className={`p-3 sm:p-3 rounded-mh-lg shadow-mh flex flex-col gap-2.5 ${plan.evaluation.overall === 'violated' ? 'bg-mh-crit-bg' : 'bg-mh-card'}`}
+                  className={`p-5 sm:p-6 rounded-mh-lg shadow-mh flex flex-col gap-4 ${plan.evaluation.overall === 'violated' ? 'bg-mh-crit-bg' : 'bg-mh-card'}`}
                   aria-live="polite"
                 >
-                  <div className="flex flex-wrap items-center gap-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
                     {plan.evaluation.overall === 'violated' ? (
                       <span className="mh-pill mh-pill--crit">
                         {state.sepAlert && isToday ? 'SEP alert · NO-GO: stay in the base' : 'Not cleared · NO-GO: stay in the base'}
@@ -175,49 +175,49 @@ export default function AstronautPanel({
                       Sol {mission.sol} · plan v{missionVersion(mission)} · out {hud.m.startLst} → back in base {hud.m.endLst}
                     </span>
                   </div>
-                  <div className="grid grid-cols-2 gap-1.5">
+                  <div className="grid grid-cols-2 gap-2">
                     <div className="mh-tile !gap-0.5">
-                      <span className="mh-stat-label">Next waypoint</span>
-                      <strong className="text-[14px] leading-tight">{hud.next.name}</strong>
+                      <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">Next waypoint</span>
+                      <strong className="text-[18px] leading-tight">{hud.next.name}</strong>
                       <span className="text-base">
                         {hud.dist.toFixed(2)} km · {compassPoint(hud.bearing)} {Math.round(hud.bearing)}°
                       </span>
                     </div>
                     <div className="mh-tile !gap-0.5">
-                      <span className="mh-stat-label">Turn back by</span>
-                      <strong className="text-[18px] leading-tight">{hud.turnBackLst}</strong>
+                      <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">Turn back by</span>
+                      <strong className="text-[26px] leading-tight">{hud.turnBackLst}</strong>
                       <span className="text-base text-mh-text2">
                         Leave {hud.lastPoi.poiId} (planned {hud.lastPoi.departLst})
                       </span>
                     </div>
                     <div className="mh-tile !gap-0.5">
-                      <span className="mh-stat-label">Return buffer</span>
-                      <strong className="text-[18px] leading-tight">{hud.m.bufferMin} min</strong>
+                      <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">Return buffer</span>
+                      <strong className="text-[26px] leading-tight">{hud.m.bufferMin} min</strong>
                       <span className="text-base text-mh-text2">Min {TIME_WINDOW.returnBufferMin} · back by {TIME_WINDOW.latestReturn}</span>
                     </div>
                     <div className="mh-tile !gap-0.5">
-                      <span className="mh-stat-label">EVA dose</span>
-                      <strong className="text-[18px] leading-tight">{hud.m.doseEvaMsv.toFixed(2)} mSv</strong>
+                      <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">EVA dose</span>
+                      <strong className="text-[26px] leading-tight">{hud.m.doseEvaMsv.toFixed(2)} mSv</strong>
                       <span className="flex flex-wrap items-center gap-1.5 text-base text-mh-text2">
                         Limit {A.evaDoseLimitMsv} mSv <SimBadge />
                       </span>
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
-                    <button type="button" onClick={onOpenBriefing} className="mh-btn mh-btn--primary mh-btn--lg !min-h-8 !px-2">
-                      <FileText className="w-4 h-4" /> EVA briefing
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <button type="button" onClick={onOpenBriefing} className="mh-btn mh-btn--primary mh-btn--lg !min-h-14 !px-3">
+                      <FileText className="w-5 h-5" /> EVA briefing
                     </button>
-                    <button type="button" onClick={reportHere} className="mh-btn mh-btn--danger mh-btn--lg !min-h-8 !px-2">
-                      <AlertTriangle className="w-4 h-4" /> Report anomaly
+                    <button type="button" onClick={reportHere} className="mh-btn mh-btn--danger mh-btn--lg !min-h-14 !px-3">
+                      <AlertTriangle className="w-5 h-5" /> Report anomaly
                     </button>
                     <button
                       type="button"
                       onClick={onOpenDebrief}
                       disabled={!!mission.debriefId}
-                      className="mh-btn mh-btn--tinted mh-btn--lg !min-h-8 !px-2"
+                      className="mh-btn mh-btn--tinted mh-btn--lg !min-h-14 !px-3"
                       title="Mandatory after the EVA"
                     >
-                      <ClipboardCheck className="w-4 h-4" /> {mission.debriefId ? 'Debrief sent' : 'EVA debrief'}
+                      <ClipboardCheck className="w-5 h-5" /> {mission.debriefId ? 'Debrief sent' : 'EVA debrief'}
                     </button>
                   </div>
                   {mission.debriefId && (
@@ -239,7 +239,7 @@ export default function AstronautPanel({
                       <p className="m-0">Mission control is updating this plan. Wait for the new version before leaving.</p>
                     </div>
                   )}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     <Stat tile label="Depart" value={`${mission.startTime}`} />
                     <Stat tile label="Back in base" value={`${plan.returnTime}`} />
                     <Stat tile label="Distance" value={`${plan.totalKm.toFixed(2)} km`} />
@@ -261,7 +261,7 @@ export default function AstronautPanel({
                               : `${item.poi.id} · ${item.poi.name}${state.measured.includes(item.poi.id) ? ' · measured' : ''}`;
                       const strong = item.kind !== 'travel';
                       return (
-                        <li key={i} className="flex gap-2.5 py-2 border-b border-mh-sep last:border-0">
+                        <li key={i} className="flex gap-4 py-2 border-b border-mh-sep last:border-0">
                           <span className="w-28 shrink-0 font-mono text-base text-mh-text2">{time}</span>
                           <span className={`text-base ${strong ? 'font-semibold' : 'text-mh-text2'}`}>{text}</span>
                         </li>
@@ -272,29 +272,31 @@ export default function AstronautPanel({
               )}
               {view === 'targets' && (
                 <Card eyebrow="Targets" title="Points of interest to reach" icon={MapPin}>
-                  <ol className="m-0 p-0 list-none flex flex-col gap-1.5">
+                  <ol className="m-0 p-0 list-none flex flex-col gap-2">
                     {plan.stops.map((poi, idx) => (
-                      <li key={poi.id} className="mh-tile !gap-1.5">
+                      <li key={poi.id} className="mh-tile !gap-2">
                         <button
                           type="button"
                           onClick={() => onFocusPoi(poi)}
-                          className="flex items-center gap-2 text-left bg-transparent border-0 p-0 cursor-pointer text-mh-text min-h-7"
+                          className="flex items-center gap-3 text-left bg-transparent border-0 p-0 cursor-pointer text-mh-text min-h-11"
                         >
-                          <span className="w-6 h-6 shrink-0 rounded-[2px] bg-mh-primary text-mh-on-primary font-mono flex items-center justify-center">
+                          <span className="w-9 h-9 shrink-0 rounded-full bg-mh-primary text-mh-on-primary font-mono flex items-center justify-center">
                             {idx + 1}
                           </span>
                           <strong className="text-base">
                             {poi.id} · {poi.name}
                           </strong>
                         </button>
-                        <div className="flex flex-wrap gap-1.5">
+                        <div className="flex flex-wrap gap-2">
                           {poi.priority && (
-                            <span className={`${PRIORITY_META[poi.priority].cls}`}>
+                            <span className={`mh-pill ${PRIORITY_META[poi.priority].cls}`}>
                               {PRIORITY_META[poi.priority].label} priority
                             </span>
                           )}
-                          <span className="mh-tag">{poi.durationMin} min on site</span>
-                          <span className="mh-tag">{poi.samplesRequired ? 'Collect samples' : 'No samples'}</span>
+                          <span className="mh-pill mh-pill--info">{poi.durationMin} min on site</span>
+                          <span className={`mh-pill ${poi.samplesRequired ? 'mh-pill--ok' : 'mh-pill--info'}`}>
+                            {poi.samplesRequired ? 'Collect samples' : 'No samples'}
+                          </span>
                         </div>
                         <p className="m-0 text-base">{poi.infoToCollect}</p>
                         {poi.samplesRequired && poi.sampleNotes && (
@@ -305,14 +307,14 @@ export default function AstronautPanel({
                             Instruments: {poi.instruments.map(instrumentName).join(', ')}
                           </p>
                         )}
-                        <div className="flex flex-wrap gap-1.5">
+                        <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
                             aria-pressed={state.measured.includes(poi.id)}
                             onClick={() => store.toggleMeasured(poi.id)}
                             className={`mh-btn ${state.measured.includes(poi.id) ? 'mh-btn--plain' : 'mh-btn--primary'}`}
                           >
-                            <CheckCircle2 className="w-4 h-4" />
+                            <CheckCircle2 className="w-5 h-5" />
                             {state.measured.includes(poi.id) ? 'Measured · undo' : 'Log measurement'}
                           </button>
                           <button
@@ -320,7 +322,7 @@ export default function AstronautPanel({
                             onClick={() => onReportAnomaly({ lat: poi.lat, lon: poi.lon, name: `${poi.id} · ${poi.name}` })}
                             className="mh-btn mh-btn--danger"
                           >
-                            <AlertTriangle className="w-4 h-4" /> Report anomaly
+                            <AlertTriangle className="w-5 h-5" /> Report anomaly
                           </button>
                         </div>
                       </li>

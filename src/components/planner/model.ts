@@ -219,10 +219,9 @@ export const STANDARD_EQUIPMENT = [
 export const SAMPLE_KIT = 'Sample tubes & sealing kit';
 
 export const PRIORITY_META: Record<Priority, { label: string; cls: string; color: string }> = {
-  // Priority is not a status: neutral tags, no status colour
-  HIGH: { label: 'High', cls: 'mh-tag mh-tag--p1', color: '#FFFFFF' },
-  MED: { label: 'Medium', cls: 'mh-tag', color: '#9BB8D6' },
-  LOW: { label: 'Low', cls: 'mh-tag mh-tag--p3', color: '#4A6FA5' }
+  HIGH: { label: 'High', cls: 'mh-pill--crit', color: 'var(--mh-accent)' },
+  MED: { label: 'Medium', cls: 'mh-pill--warn', color: 'var(--mh-warn)' },
+  LOW: { label: 'Low', cls: 'mh-pill--info', color: 'var(--mh-info)' }
 };
 
 // Field discoveries (FE-…) logged during EVAs: colour, label and suggested interest type per class
@@ -232,9 +231,9 @@ export const HAZARD_CLASSES = ['boulder', 'soft-soil'];
 export const isHazard = (fe: { class: string }) => HAZARD_CLASSES.includes(fe.class);
 
 export const FIELD_EVENT_META: Record<string, { color: string; label: string; interestType: string }> = {
-  'formation-interest': { color: '#2DCCFF', label: 'Formation of interest', interestType: 'Geology' },
-  boulder: { color: '#FFB302', label: 'Boulder hazard', interestType: 'Hazard survey' },
-  'soft-soil': { color: '#FCE83A', label: 'Soft soil', interestType: 'Hazard survey' }
+  'formation-interest': { color: '#38bdf8', label: 'Formation of interest', interestType: 'Geology' },
+  boulder: { color: '#E5484D', label: 'Boulder hazard', interestType: 'Hazard survey' },
+  'soft-soil': { color: '#E5C04A', label: 'Soft soil', interestType: 'Hazard survey' }
 };
 
 export interface FieldEvent {

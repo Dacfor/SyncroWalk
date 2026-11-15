@@ -1,13 +1,7 @@
 import type { ComponentType, KeyboardEvent, ReactNode } from 'react';
-import { Check } from 'lucide-react';
 
-// Operations-console building blocks shared by the three role panels
-// (look: Astro UX Design System — docked windows, dense rows, status colours only).
+// Small Mission Hub layout helpers shared by the three role panels.
 
-/**
- * Docked window: compact header (icon, TITLE in caps, context in mono) with the counter
- * and the actions on the right, then the body.
- */
 export function Card({
   eyebrow,
   title,
@@ -26,40 +20,47 @@ export function Card({
   children?: ReactNode;
 }) {
   return (
-    <section className={`mh-panel ${highlight ? 'is-highlight' : ''}`}>
-      <header className="mh-panel__head">
-        {Icon && <Icon aria-hidden={true} />}
-        <h2 className="mh-panel__title">{title}</h2>
-        {eyebrow && <span className="mh-panel__meta">{eyebrow}</span>}
-        {aside && <div className="mh-panel__actions">{aside}</div>}
+    <section
+      className={`bg-mh-card rounded-mh-lg shadow-mh p-5 sm:p-6 flex flex-col gap-4 ${
+        highlight ? 'ring-2 ring-mh-primary' : ''
+      }`}
+    >
+      <header className="flex items-start justify-between gap-3">
+        <div className="flex flex-col gap-1 min-w-0">
+          {eyebrow && <span className="mh-eyebrow">{eyebrow}</span>}
+          <h2 className="m-0 text-[22px] leading-tight font-bold flex items-start gap-2">
+            {Icon && (
+              <Icon className="w-6 h-6 mt-0.5 shrink-0 text-mh-primary dark:text-mh-link" aria-hidden={true} />
+            )}
+            <span>{title}</span>
+          </h2>
+          {subtitle && <p className="m-0 text-base text-mh-text2">{subtitle}</p>}
+        </div>
+        {aside && <div className="shrink-0">{aside}</div>}
       </header>
-      <div className="mh-panel__body">
-        {subtitle && <p className="mh-panel__sub">{subtitle}</p>}
-        {children}
-      </div>
+      {children}
     </section>
   );
 }
 
-/** Label + value. Values are numbers, times or coordinates most of the time: monospace, tabular. */
 export function Stat({ label, value, tile = false }: { label: ReactNode; value: ReactNode; tile?: boolean }) {
   return (
-    <span className={`flex flex-col gap-0.5 min-w-0 ${tile ? 'mh-tile' : ''}`}>
-      <span className="mh-stat-label">{label}</span>
-      <span className="mh-num text-[13px] font-medium">{value}</span>
+    <span className={`flex flex-col gap-0.5 ${tile ? 'mh-tile' : ''}`}>
+      <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">{label}</span>
+      <span className="text-base font-semibold">{value}</span>
     </span>
   );
 }
 
 export function Label({ htmlFor, children }: { htmlFor?: string; children: ReactNode }) {
   return (
-    <label htmlFor={htmlFor} className="mh-label">
+    <label htmlFor={htmlFor} className="mh-label !text-base">
       {children}
     </label>
   );
 }
 
-/** Segmented choice (radio group): joined rectangular buttons. */
+/** iOS-style segmented choice (radio group). */
 export function Segmented<T extends string>({
   label,
   value,
@@ -74,7 +75,14 @@ export function Segmented<T extends string>({
   return (
     <div className="mh-segmented self-start" role="radiogroup" aria-label={label}>
       {options.map((o) => (
-        <button key={o.value} type="button" role="radio" aria-checked={value === o.value} onClick={() => onChange(o.value)}>
+        <button
+          key={o.value}
+          type="button"
+          role="radio"
+          aria-checked={value === o.value}
+          onClick={() => onChange(o.value)}
+          className="!px-4"
+        >
           {o.label}
         </button>
       ))}
@@ -82,28 +90,38 @@ export function Segmented<T extends string>({
   );
 }
 
-/** Check mark box used by toggles (state is never shown by colour alone). */
-export function CheckBox({ on }: { on: boolean }) {
+/** Toggle chip with an explicit on/off state (never colour alone). */
+export function Chip({
+  on,
+  onClick,
+  children
+}: {
+  on: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
   return (
-    <span className={`mh-check ${on ? 'is-on' : ''}`} aria-hidden="true">
-      {on && <Check />}
-    </span>
-  );
-}
-
-/** Toggle chip with an explicit on/off state. */
-export function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button type="button" aria-pressed={on} onClick={onClick} className={`mh-btn mh-toggle ${on ? 'is-on' : ''}`}>
-      <CheckBox on={on} />
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={onClick}
+      className={`mh-btn !px-4 !font-medium ${on ? 'mh-btn--tinted' : 'bg-mh-fill text-mh-text2'}`}
+    >
+      <span
+        className={`w-5 h-5 rounded-full border-2 border-current flex items-center justify-center text-xs ${
+          on ? 'bg-current' : ''
+        }`}
+        aria-hidden="true"
+      >
+        {on && <span className="text-mh-card">✓</span>}
+      </span>
       <span>{children}</span>
     </button>
   );
 }
 
-// Plan status: draft = standby, changed = serious (needs action), sent = normal
 export const STATUS_META = {
-  draft: { label: 'Draft', cls: 'mh-pill--info' },
+  draft: { label: 'Draft', cls: 'mh-pill--warn' },
   changed: { label: 'Changed · not sent', cls: 'mh-pill--warn' },
   sent: { label: 'Sent', cls: 'mh-pill--ok' }
 } as const;
@@ -116,7 +134,7 @@ export interface PanelTab<T extends string> {
 }
 
 /**
- * Role menu: a compact tab strip that chooses which window is shown in the side column.
+ * Role menu: chooses which panel (actions / views) is shown in the side column.
  * Sticky so it stays reachable while the column scrolls. Arrow keys move between tabs.
  */
 export function PanelTabs<T extends string>({
@@ -141,7 +159,13 @@ export function PanelTabs<T extends string>({
 
   return (
     <nav className="lg:sticky lg:top-0 z-20" aria-label={label}>
-      <div role="tablist" aria-label={label} onKeyDown={onKeyDown} className="mh-tabs">
+      <div
+        role="tablist"
+        aria-label={label}
+        onKeyDown={onKeyDown}
+        className="bg-mh-card rounded-mh-lg shadow-mh p-1.5 grid gap-1"
+        style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}
+      >
         {tabs.map((t) => {
           const active = t.id === value;
           return (
@@ -154,11 +178,21 @@ export function PanelTabs<T extends string>({
               aria-controls={`tabpanel-${t.id}`}
               tabIndex={active ? 0 : -1}
               onClick={() => onChange(t.id)}
-              className="mh-tab"
+              className={`min-h-14 px-2 py-2 rounded-mh-md border-0 cursor-pointer flex flex-col items-center justify-center gap-1 text-center transition-colors ${
+                active
+                  ? 'bg-mh-primary text-mh-on-primary shadow-mh-btn'
+                  : 'bg-transparent text-mh-text2 hover:bg-mh-fill hover:text-mh-text'
+              }`}
             >
-              <t.icon aria-hidden={true} />
-              <span>{t.label}</span>
-              {t.badge !== undefined && t.badge !== null && t.badge !== 0 && <span className="mh-count">{t.badge}</span>}
+              <span className="relative">
+                <t.icon className="w-5 h-5" aria-hidden={true} />
+                {t.badge !== undefined && t.badge !== null && t.badge !== 0 && (
+                  <span className="absolute -top-2 -right-3 min-w-5 h-5 px-1 rounded-full bg-mh-accent text-white font-mono text-xs flex items-center justify-center">
+                    {t.badge}
+                  </span>
+                )}
+              </span>
+              <span className="text-[15px] font-semibold leading-tight">{t.label}</span>
             </button>
           );
         })}
@@ -169,7 +203,7 @@ export function PanelTabs<T extends string>({
 
 export function TabPanel({ id, children }: { id: string; children: ReactNode }) {
   return (
-    <div role="tabpanel" id={`tabpanel-${id}`} aria-labelledby={`tab-${id}`} className="flex flex-col gap-2">
+    <div role="tabpanel" id={`tabpanel-${id}`} aria-labelledby={`tab-${id}`} className="flex flex-col gap-5 sm:gap-6">
       {children}
     </div>
   );
