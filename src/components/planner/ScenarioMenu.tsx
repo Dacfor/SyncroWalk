@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { Check, ChevronDown, History } from 'lucide-react';
+import { Check, ChevronDown, History, Play } from 'lucide-react';
 import { SCENARIOS } from './scenarios/index.ts';
 
 /**
  * Scenario selector in the navbar, same look and behaviour as the user menu.
  * Each scenario loads a complete (simulated) history and resets the filters.
+ * `onPlayDemo` starts the scripted Sol 58 demo (timed steps on the same actions as the buttons).
  */
-export default function ScenarioMenu({ value, onSelect }: { value: string; onSelect: (id: string) => void }) {
+export default function ScenarioMenu({ value, onSelect, onPlayDemo }: { value: string; onSelect: (id: string) => void; onPlayDemo?: () => void }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -110,6 +111,28 @@ export default function ScenarioMenu({ value, onSelect }: { value: string; onSel
               </button>
             );
           })}
+          {onPlayDemo && (
+            <>
+              <div className="mx-3 my-1 border-t border-mh-sep" role="separator" />
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  close();
+                  onPlayDemo();
+                }}
+                className="w-full min-h-14 px-3 py-2 rounded-mh-sm border-0 text-left cursor-pointer flex items-center gap-3 text-mh-text bg-transparent hover:bg-mh-fill focus-visible:outline-3"
+              >
+                <span className="w-9 h-9 rounded-full bg-mh-fill-blue flex items-center justify-center shrink-0">
+                  <Play className="w-4 h-4" aria-hidden="true" />
+                </span>
+                <span className="flex-1 min-w-0 flex flex-col">
+                  <span className="text-base font-semibold">Play the scripted demo · Sol 58</span>
+                  <span className="text-base text-mh-text2">About 80 s, runs on its own. Esc stops, → skips a step, Space pauses.</span>
+                </span>
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

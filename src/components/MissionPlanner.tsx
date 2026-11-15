@@ -33,6 +33,8 @@ import AstronautPanel from './planner/AstronautPanel.tsx';
 import { DiscoveryDetail, DiscoveryList } from './planner/Discoveries.tsx';
 import UserMenu from './planner/UserMenu.tsx';
 import ScenarioMenu from './planner/ScenarioMenu.tsx';
+import DemoBar from './planner/DemoBar.tsx';
+import { DEMO_SOL58_SECONDS, DEMO_SOL58_STEPS } from './planner/demoSol58.ts';
 import logoUrl from '../logo/logo.png';
 import logoNameUrl from '../logo/logo_name.png';
 import EvaBriefing from './planner/Briefing.tsx';
@@ -657,6 +659,16 @@ export default function MissionPlanner() {
   const [selectedFeId, setSelectedFeId] = useState('FE-024-003'); // discovery selected in list / field map
   const [showFieldMap, setShowFieldMap] = useState(false); // field discoveries window (second map)
   const [showBriefing, setShowBriefing] = useState(false); // astronaut EVA briefing (printable, third map)
+  // Scripted demo (Sol 58): { step, paused, t0 (ms), elapsed (s, while paused) } or null when not running
+  const [demo, setDemo] = useState(null);
+  const [demoNow, setDemoNow] = useState(0); // ticks while the demo runs, for the progress bar
+  const demoRef = useRef(null);
+  demoRef.current = demo;
+  const demoTimersRef = useRef([]);
+  const demoCtxRef = useRef(null); // latest planner setters, filled after every render (see below)
+  const demoAutoStartedRef = useRef(false);
+  const stateRef = useRef(planner.state);
+  stateRef.current = planner.state;
 
   // Layers: user choices from "All layers" (role-driven layers follow activeFilters instead)
   const [layerOverrides, setLayerOverrides] = useState({});
@@ -937,6 +949,85 @@ export default function MissionPlanner() {
     mapInstanceRef.current?.closePopup();
     mapInstanceRef.current?.setView(JEZERO_CENTER, 14);
   };
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SCRIPTED DEMO (Sol 58): timed steps that call the same actions as the buttons.
+  // Start it from the scenario menu or with ?demo=sol58. Esc stops, → skips, Space pauses.
+  // ═══════════════════════════════════════════════════════════════════════════
+  const clearDemoTimers = () => {
+    demoTimersRef.current.forEach(clearTimeout);
+    demoTimersRef.current = [];
+  };
+  const stopDemo = () => {
+    clearDemoTimers();
+    setHighlightPts(null);
+    setDemo(null);
+  };
+  const runDemoStep = (i) => {
+    const st = DEMO_SOL58_STEPS[i];
+    if (!st || !demoCtxRef.current) return;
+    st.run(demoCtxRef.current);
+    setDemo((d) => (d ? { ...d, step: i } : d));
+  };
+  // (Re)schedule every step after `elapsedSec`; runs step `runIndex` right now when given
+  const scheduleDemo = (elapsedSec, runIndex) => {
+    clearDemoTimers();
+    const step = runIndex ?? demoRef.current?.step ?? 0;
+    setDemo({ step, paused: false, t0: Date.now() - elapsedSec * 1000, elapsed: elapsedSec });
+    if (runIndex != null) runDemoStep(runIndex);
+    DEMO_SOL58_STEPS.forEach((st, i) => {
+      const delay = (st.at - elapsedSec) * 1000;
+      if (delay > 0) demoTimersRef.current.push(setTimeout(() => runDemoStep(i), delay));
+    });
+    demoTimersRef.current.push(setTimeout(stopDemo, Math.max(0, (DEMO_SOL58_SECONDS - elapsedSec) * 1000)));
+  };
+  const startDemo = () => scheduleDemo(0, 0);
+  const nextDemoStep = () => {
+    const i = Math.min(DEMO_SOL58_STEPS.length - 1, (demoRef.current?.step ?? -1) + 1);
+    scheduleDemo(DEMO_SOL58_STEPS[i].at, i);
+  };
+  const toggleDemoPause = () => {
+    const d = demoRef.current;
+    if (!d) return;
+    if (d.paused) scheduleDemo(d.elapsed, null);
+    else {
+      clearDemoTimers();
+      setDemo({ ...d, paused: true, elapsed: (Date.now() - d.t0) / 1000 });
+    }
+  };
+  // Keyboard while the demo runs
+  useEffect(() => {
+    if (!demo) return;
+    const onKey = (e) => {
+      const tag = e.target?.tagName;
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+      if (e.key === 'Escape') stopDemo();
+      else if (e.key === 'ArrowRight') nextDemoStep();
+      else if (e.key === ' ') {
+        e.preventDefault();
+        toggleDemoPause();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [demo]);
+  // Progress bar ticks
+  useEffect(() => {
+    if (!demo || demo.paused) return;
+    const id = setInterval(() => setDemoNow(Date.now()), 250);
+    return () => clearInterval(id);
+  }, [demo]);
+  // ?demo=sol58 starts the demo once the map exists
+  useEffect(() => {
+    if (!mapReady || demoAutoStartedRef.current) return;
+    if (new URLSearchParams(window.location.search).get('demo') === 'sol58') {
+      demoAutoStartedRef.current = true;
+      setTimeout(startDemo, 600);
+    }
+  }, [mapReady]);
+  useEffect(() => clearDemoTimers, []);
+  const demoStep = demo ? DEMO_SOL58_STEPS[demo.step] : null;
+  const demoElapsed = demo ? (demo.paused ? demo.elapsed : (Math.max(demoNow, demo.t0) - demo.t0) / 1000) : 0;
 
   const handleToggleRoleFilter = (filterKey) => {
     setActiveFilters((prev) => ({
@@ -1977,6 +2068,34 @@ export default function MissionPlanner() {
     mapInstanceRef.current?.panTo([poi.lat, poi.lon], { animate: true });
   };
 
+  // What the scripted demo can drive: the same setters and actions the buttons use (latest render)
+  demoCtxRef.current = {
+    store: planner,
+    state: () => stateRef.current,
+    loadScenario: handleLoadScenario,
+    setRole: handleRoleSwitch,
+    setView: (role, view) => setRoleViews((prev) => ({ ...prev, [role]: view })),
+    selectMission: setSelectedMissionId,
+    focusPoi: (id) => {
+      const p = stateRef.current.pois.find((x) => x.id === id);
+      if (p) {
+        focusPoi(p);
+        mapInstanceRef.current?.setView([p.lat, p.lon], 16, { animate: true });
+      }
+    },
+    showFe: (id) => {
+      const fe = stateRef.current.fieldEvents.find((f) => f.id === id) ?? null;
+      if (fe) setSelectedFeId(fe.id);
+      showFeOnMainMap(fe);
+    },
+    setAstronautSol,
+    setBriefing: setShowBriefing,
+    highlight: (pts) => {
+      setHighlightPts(pts);
+      if (pts) mapInstanceRef.current?.fitBounds(pts, { padding: [80, 80], maxZoom: 17, animate: true });
+    }
+  };
+
   const pendingMissions = planner.state.missions.filter((m) => m.status !== 'sent').length;
   const mapRouteVisible =
     currentRole === 'control'
@@ -2029,17 +2148,31 @@ export default function MissionPlanner() {
               );
             })()}
             {/* Scenario: each one loads a complete (simulated) history and resets the filters */}
-            <ScenarioMenu value={planner.state.scenarioId} onSelect={handleLoadScenario} />
+            <ScenarioMenu value={planner.state.scenarioId} onSelect={handleLoadScenario} onPlayDemo={startDemo} />
             {/* Signed-in user + role switcher (simulated users, no authentication yet) */}
             <UserMenu role={currentRole} onSelect={handleRoleSwitch} pendingMissions={pendingMissions} onResetDemo={handleResetDemo} onOpenEvidence={() => setShowEvidenceDrawer(true)} />
           </div>
         </div>
       </header>
 
+      {/* Scripted demo caption bar (Sol 58) */}
+      {demo && demoStep && (
+        <DemoBar
+          step={demo.step + 1}
+          total={DEMO_SOL58_STEPS.length}
+          title={demoStep.title}
+          progress={demoElapsed / DEMO_SOL58_SECONDS}
+          paused={demo.paused}
+          onNext={nextDemoStep}
+          onTogglePause={toggleDemoPause}
+          onStop={stopDemo}
+        />
+      )}
+
       {/* Toast Notification — floats, so the layout never jumps */}
       {toastMsg && (
         <div
-          className="fixed bottom-4 inset-x-4 sm:inset-x-auto sm:right-6 sm:max-w-md z-50"
+          className={`fixed ${demo ? 'bottom-28' : 'bottom-4'} inset-x-4 sm:inset-x-auto sm:right-6 sm:max-w-md z-50`}
           role="status"
           aria-live="polite"
         >

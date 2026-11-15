@@ -3,6 +3,7 @@ import type { PlannerState } from '../model.ts';
 import { SOL1_STATE } from './sol1.ts';
 import { SOL3_STATE } from './sol3.ts';
 import { SOL20_STATE } from './sol20.ts';
+import { SOL58_STATE } from './sol58.ts';
 
 // Scenario selector (top bar). Each scenario is a complete seed of the shared state.
 // All of them are simulated histories written for the demo.
@@ -37,6 +38,12 @@ export const SCENARIOS: Scenario[] = [
     label: 'Sol 20 — Advanced ops',
     summary: '16 EVAs: route history, terrain validated in situ, follow-up targets, two SEP events, one astronaut out of dose budget.',
     state: SOL20_STATE
+  },
+  {
+    id: 'sol58',
+    label: 'Sol 58 — End of campaign',
+    summary: 'A hub lab result on a Sol 41 sample re-opens a low-priority target: Sol 59 goes NO-GO on dose and time, and is re-planned with the other EVA pair.',
+    state: SOL58_STATE
   }
 ];
 
