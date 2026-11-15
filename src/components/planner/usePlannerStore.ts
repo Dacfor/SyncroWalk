@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { SEED_STATE, newMissionId, nextPoiId, TODAY_SOL } from './model.ts';
-import type { DailyMission, PlannerState, Poi, Priority } from './model.ts';
+import type { DailyMission, FieldEvent, PlannerState, Poi, Priority } from './model.ts';
 
 const STORAGE_KEY = 'syncrowalk-planner-v1';
 
@@ -10,7 +10,8 @@ const load = (): PlannerState => {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed?.pois) && Array.isArray(parsed?.missions)) {
-        return { packed: {}, ...parsed };
+        // Older saved states lack newer fields: take them from the seed
+        return { ...SEED_STATE, ...parsed };
       }
     }
   } catch {
@@ -119,6 +120,12 @@ export function usePlannerStore() {
     deleteMission(id: string) {
       setState((s) => ({ ...s, missions: s.missions.filter((m) => m.id !== id) }));
     },
+    sendMission(id: string) {
+      setState((s) => ({ ...s, missions: s.missions.map((m) => (m.id === id ? { ...m, status: 'sent' } : m)) }));
+    },
+    setSepAlert(on: boolean) {
+      setState((s) => ({ ...s, sepAlert: on }));
+    },
     sendAllMissions(): number {
       const pending = state.missions.filter((m) => m.status !== 'sent').length;
       setState((s) => ({ ...s, missions: s.missions.map((m) => ({ ...m, status: 'sent' })) }));
@@ -137,6 +144,17 @@ export function usePlannerStore() {
           }
         };
       });
+    },
+
+    // Anomaly report from the field: becomes a discovery for the scientist and slows the route model
+    addFieldEvent(fe: FieldEvent) {
+      setState((s) => ({ ...s, fieldEvents: [...s.fieldEvents, fe] }));
+    },
+    toggleMeasured(poiId: string) {
+      setState((s) => ({
+        ...s,
+        measured: s.measured.includes(poiId) ? s.measured.filter((x) => x !== poiId) : [...s.measured, poiId]
+      }));
     },
 
     resetDemoData() {

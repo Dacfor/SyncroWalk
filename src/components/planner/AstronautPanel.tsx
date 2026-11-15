@@ -1,6 +1,8 @@
-import { Backpack, CalendarDays, Clock, MapPin } from 'lucide-react';
+import { AlertTriangle, Backpack, CalendarDays, CheckCircle2, Clock, FileText, MapPin } from 'lucide-react';
 import { Card, PanelTabs, Stat, TabPanel } from './ui.tsx';
-import { PRIORITY_META, TODAY_SOL, instrumentName, planMission } from './model.ts';
+import { PRIORITY_META, TODAY_SOL, instrumentName, planFor } from './model.ts';
+import { DEMO_ASSUMPTIONS as A, TIME_WINDOW, addMinutesToLst, bearingDeg, compassPoint, distKm, lstToMin } from './analysis.ts';
+import { SimBadge } from './analysisUi.tsx';
 import type { Poi } from './model.ts';
 import type { PlannerStore } from './usePlannerStore.ts';
 
@@ -8,7 +10,9 @@ import type { PlannerStore } from './usePlannerStore.ts';
  * ASTRONAUT — sees the calendar sent by mission control, with today's EVA in focus:
  * the timed schedule, the points of interest to reach and the material to bring.
  * Selecting another Sol shows that day's points of interest and route on the map.
- * Menu: "Today"/"Day" (schedule) · "Targets" · "Material" (checklist) · "Calendar".
+ * Menu: "Today"/"Day" (mini-HUD + schedule) · "Targets" (log measurements) · "Material" (checklist) · "Calendar".
+ * Field actions flow back: "Log measurement" marks a target as measured for the scientist,
+ * "Report anomaly" creates a field discovery and slows the mission-control route model.
  */
 export type AstronautView = 'schedule' | 'targets' | 'material' | 'calendar';
 
@@ -18,7 +22,9 @@ export default function AstronautPanel({
   setSelectedSol,
   onFocusPoi,
   view,
-  setView
+  setView,
+  onOpenBriefing,
+  onReportAnomaly
 }: {
   store: PlannerStore;
   selectedSol: number;
@@ -26,16 +32,36 @@ export default function AstronautPanel({
   onFocusPoi: (poi: Poi) => void;
   view: AstronautView;
   setView: (v: AstronautView) => void;
+  onOpenBriefing: () => void;
+  onReportAnomaly: (at: { lat: number; lon: number; name: string }) => void;
 }) {
   const { state } = store;
   // Drafts are not visible until mission control sends them
   const visible = state.missions.filter((m) => m.status !== 'draft').sort((a, b) => a.sol - b.sol);
   const sols = [...new Set([TODAY_SOL, ...visible.map((m) => m.sol)])].sort((a, b) => a - b);
   const mission = visible.find((m) => m.sol === selectedSol) ?? null;
-  const plan = mission ? planMission(mission, state.pois) : null;
+  const plan = mission ? planFor(state, mission) : null;
   const packed = mission ? state.packed[mission.id] ?? [] : [];
   const isToday = selectedSol === TODAY_SOL;
   const packedCount = plan ? packed.filter((p) => plan.equipment.includes(p)).length : 0;
+
+  // Mini-HUD (demo position model): the crew is at the last measured stop, or at the base
+  const hud = (() => {
+    if (!plan || !plan.stops.length) return null;
+    const m = plan.metrics;
+    const poiStops = m.stops.filter((st: { kind: string }) => st.kind === 'poi');
+    const lastDone = [...poiStops].reverse().find((st: { poiId: string }) => state.measured.includes(st.poiId));
+    const cur = lastDone ?? m.stops[0];
+    const next = poiStops.find((st: { poiId: string }) => !state.measured.includes(st.poiId)) ?? m.stops[m.stops.length - 1];
+    const bearing = bearingDeg([cur.lat, cur.lon], [next.lat, next.lon]);
+    const dist = Math.max(0, next.distKm - cur.distKm) || distKm([cur.lat, cur.lon], [next.lat, next.lon]);
+    const lastPoi = poiStops[poiStops.length - 1];
+    // Leave the last target by this time to keep the minimum return buffer
+    const returnLegMin = lstToMin(m.endLst) - lstToMin(lastPoi.departLst);
+    const turnBackLst = addMinutesToLst(TIME_WINDOW.latestReturn, -(TIME_WINDOW.returnBufferMin + returnLegMin));
+    return { m, cur, next, bearing, dist, lastPoi, turnBackLst };
+  })();
+  const reportHere = () => hud && onReportAnomaly({ lat: hud.next.lat, lon: hud.next.lon, name: hud.next.name });
 
   // Which Sol the views refer to, with shortcuts back to today / to the calendar
   const dayBar = (
@@ -126,6 +152,61 @@ export default function AstronautPanel({
             </Card>
           ) : (
             <>
+              {view === 'schedule' && hud && (
+                <section
+                  className={`p-5 sm:p-6 rounded-mh-lg shadow-mh flex flex-col gap-4 ${state.sepAlert ? 'bg-mh-crit-bg' : 'bg-mh-card'}`}
+                  aria-live="polite"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    {state.sepAlert ? (
+                      <span className="mh-pill mh-pill--crit">SEP alert: go to the nearest shelter now</span>
+                    ) : plan.evaluation.overall === 'violated' ? (
+                      <span className="mh-pill mh-pill--crit">Not cleared · NO-GO</span>
+                    ) : (
+                      <span className="mh-pill mh-pill--ok">On plan · GO</span>
+                    )}
+                    <span className="text-base font-semibold">
+                      Sol {mission.sol} · out {hud.m.startLst} → back in base {hud.m.endLst}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="mh-tile !gap-0.5">
+                      <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">Next waypoint</span>
+                      <strong className="text-[18px] leading-tight">{hud.next.name}</strong>
+                      <span className="text-base">
+                        {hud.dist.toFixed(2)} km · {compassPoint(hud.bearing)} {Math.round(hud.bearing)}°
+                      </span>
+                    </div>
+                    <div className="mh-tile !gap-0.5">
+                      <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">Turn back by</span>
+                      <strong className="text-[26px] leading-tight">{hud.turnBackLst}</strong>
+                      <span className="text-base text-mh-text2">
+                        Leave {hud.lastPoi.poiId} (planned {hud.lastPoi.departLst})
+                      </span>
+                    </div>
+                    <div className="mh-tile !gap-0.5">
+                      <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">Return buffer</span>
+                      <strong className="text-[26px] leading-tight">{hud.m.bufferMin} min</strong>
+                      <span className="text-base text-mh-text2">Min {TIME_WINDOW.returnBufferMin} · back by {TIME_WINDOW.latestReturn}</span>
+                    </div>
+                    <div className="mh-tile !gap-0.5">
+                      <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">EVA dose</span>
+                      <strong className="text-[26px] leading-tight">{hud.m.doseEvaMsv.toFixed(2)} mSv</strong>
+                      <span className="flex flex-wrap items-center gap-1.5 text-base text-mh-text2">
+                        Limit {A.evaDoseLimitMsv} mSv <SimBadge />
+                      </span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button type="button" onClick={onOpenBriefing} className="mh-btn mh-btn--primary mh-btn--lg !min-h-14">
+                      <FileText className="w-5 h-5" /> EVA briefing
+                    </button>
+                    <button type="button" onClick={reportHere} className="mh-btn mh-btn--danger mh-btn--lg !min-h-14">
+                      <AlertTriangle className="w-5 h-5" /> Report anomaly
+                    </button>
+                  </div>
+                </section>
+              )}
               {view === 'schedule' && (
                 <Card
                   eyebrow={isToday ? `Today · Sol ${mission.sol}` : `Sol ${mission.sol}`}
@@ -140,24 +221,23 @@ export default function AstronautPanel({
                   )}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     <Stat tile label="Depart" value={`${mission.startTime}`} />
-                    <Stat tile label="Return" value={`${plan.returnTime}`} />
+                    <Stat tile label="Back in base" value={`${plan.returnTime}`} />
                     <Stat tile label="Distance" value={`${plan.totalKm.toFixed(2)} km`} />
                     <Stat tile label="Stops" value={plan.stops.length} />
                   </div>
 
                   <ol className="m-0 p-0 list-none flex flex-col">
                     {plan.schedule.map((item, i) => {
-                      const time =
-                        item.kind === 'depart' || item.kind === 'return' ? item.time : `${item.start}–${item.end}`;
+                      const time = `${item.start}–${item.end}`;
                       const text =
-                        item.kind === 'depart'
-                          ? 'Leave the base'
-                          : item.kind === 'return'
-                            ? 'Back at the base'
+                        item.kind === 'egress'
+                          ? 'Egress: airlock & suit checks'
+                          : item.kind === 'ingress'
+                            ? 'Ingress: back inside the base'
                             : item.kind === 'travel'
                               ? `Walk to ${item.to} · ${item.km.toFixed(2)} km`
-                              : `${item.poi.id} · ${item.poi.name}`;
-                      const strong = item.kind === 'stop' || item.kind === 'depart' || item.kind === 'return';
+                              : `${item.poi.id} · ${item.poi.name}${state.measured.includes(item.poi.id) ? ' · measured' : ''}`;
+                      const strong = item.kind !== 'travel';
                       return (
                         <li key={i} className="flex gap-4 py-2 border-b border-mh-sep last:border-0">
                           <span className="w-28 shrink-0 font-mono text-base text-mh-text2">{time}</span>
@@ -205,6 +285,24 @@ export default function AstronautPanel({
                             Instruments: {poi.instruments.map(instrumentName).join(', ')}
                           </p>
                         )}
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            aria-pressed={state.measured.includes(poi.id)}
+                            onClick={() => store.toggleMeasured(poi.id)}
+                            className={`mh-btn ${state.measured.includes(poi.id) ? 'mh-btn--plain' : 'mh-btn--primary'}`}
+                          >
+                            <CheckCircle2 className="w-5 h-5" />
+                            {state.measured.includes(poi.id) ? 'Measured · undo' : 'Log measurement'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onReportAnomaly({ lat: poi.lat, lon: poi.lon, name: `${poi.id} · ${poi.name}` })}
+                            className="mh-btn mh-btn--danger"
+                          >
+                            <AlertTriangle className="w-5 h-5" /> Report anomaly
+                          </button>
+                        </div>
                       </li>
                     ))}
                   </ol>

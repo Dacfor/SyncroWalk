@@ -1,14 +1,26 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Crosshair, Gem, List, Map as MapIcon, MapPin, MapPinPlus, Pencil, PlusCircle, Trash2 } from 'lucide-react';
+import { Crosshair, FlaskConical, Gem, Lightbulb, List, Map as MapIcon, MapPin, MapPinPlus, Pencil, PlusCircle, Trash2 } from 'lucide-react';
 import { DiscoveryDetail, DiscoveryList } from './Discoveries.tsx';
 import { Card, Label, PanelTabs, Segmented, TabPanel } from './ui.tsx';
-import { FIELD_EVENT_META, INTEREST_TYPES, PRIORITY_META } from './model.ts';
+import { FIELD_EVENT_META, INTEREST_TYPES, PRIORITY_META, TODAY_SOL, planFor } from './model.ts';
+import {
+  CONSTRAINT_STATUS,
+  DEMO_ASSUMPTIONS as A,
+  HYPOTHESES,
+  HYPOTHESIS_STATUS,
+  MISSION_OBJECTIVE,
+  TIME_WINDOW,
+  distToPolylineKm,
+  getHydration,
+  hypothesisStatus
+} from './analysis.ts';
+import { SimBadge, ValueWithUncertainty } from './analysisUi.tsx';
 import type { FieldEvent, Poi } from './model.ts';
 import type { PlannerStore } from './usePlannerStore.ts';
 
 type LatLon = { lat: number; lon: number } | null;
-export type ScientistView = 'define' | 'list' | 'discoveries';
+export type ScientistView = 'define' | 'list' | 'discoveries' | 'hypotheses';
 
 const EMPTY_FORM = {
   name: '',
@@ -40,6 +52,7 @@ export default function ScientistPanel({
   fieldEvents,
   shownFeId,
   onShowFe,
+  onOpenPoiPopup,
   selectedFeId,
   setSelectedFeId,
   onOpenFieldMap,
@@ -59,6 +72,7 @@ export default function ScientistPanel({
   fieldEvents: FieldEvent[];
   shownFeId: string | null;
   onShowFe: (fe: FieldEvent | null) => void;
+  onOpenPoiPopup: (poi: Poi) => void;
   selectedFeId: string | null;
   setSelectedFeId: (id: string) => void;
   onOpenFieldMap: () => void;
@@ -153,6 +167,31 @@ export default function ScientistPanel({
     state.missions.filter((m) => m.poiIds.includes(poiId)).map((m) => m.sol).sort((a, b) => a - b);
 
   const awaiting = state.pois.filter((p) => !p.priority).length;
+  const selectedPoi = state.pois.find((p) => p.id === selectedPoiId) ?? null;
+
+  // What visiting a target costs, estimated with the Mission Control EVA model
+  const operationalImpact = (poi: Poi) => {
+    const statusOf = (buffer: number) =>
+      buffer < TIME_WINDOW.returnBufferMin ? 'violated' : buffer < TIME_WINDOW.returnBufferMin * 1.1 ? 'watch' : 'ok';
+    const scheduled = state.missions.filter((m) => m.poiIds.includes(poi.id)).sort((a, b) => a.sol - b.sol)[0];
+    if (scheduled) {
+      const plan = planFor(state, scheduled);
+      return {
+        text: `Scheduled Sol ${scheduled.sol}: ${poi.durationMin} min on site · return buffer ${plan.metrics.bufferMin} min`,
+        status: statusOf(plan.metrics.bufferMin)
+      };
+    }
+    // Not scheduled: cost of adding it as a detour to the next mission with stops
+    const next = [...state.missions]
+      .filter((m) => m.sol >= TODAY_SOL && m.poiIds.length)
+      .sort((a, b) => a.sol - b.sol)[0];
+    if (!next) return { text: 'Not scheduled yet · no upcoming mission to compare with', status: 'ok' };
+    const plan = planFor(state, next);
+    const detourKm = distToPolylineKm([poi.lat, poi.lon], plan.path.map((p) => [p.lat, p.lon])) * 2 * A.shelterPathTortuosity;
+    const deltaMin = Math.round((detourKm / A.walkSpeedKmhFlat) * 60 + poi.durationMin);
+    const newBuffer = plan.metrics.bufferMin - deltaMin;
+    return { text: `Not scheduled. Adding it to Sol ${next.sol} ≈ +${deltaMin} min → buffer ${newBuffer} min`, status: statusOf(newBuffer) };
+  };
 
   // Field discovery → pre-filled "Add point" form (the scientist reviews it, then saves)
   const applyDiscovery = (fe: FieldEvent) => {
@@ -192,7 +231,8 @@ export default function ScientistPanel({
         tabs={[
           { id: 'define', label: editingId ? 'Edit point' : 'Add point', icon: MapPinPlus },
           { id: 'list', label: 'My points', icon: List, badge: state.pois.length },
-          { id: 'discoveries', label: 'Discoveries', icon: Gem, badge: fieldEvents.filter((f) => !poiFromFe(f.id)).length }
+          { id: 'discoveries', label: 'Discoveries', icon: Gem, badge: fieldEvents.filter((f) => !poiFromFe(f.id)).length },
+          { id: 'hypotheses', label: 'Hypotheses', icon: Lightbulb }
         ]}
       />
 
@@ -327,6 +367,88 @@ export default function ScientistPanel({
 
       {view === 'list' && (
       <TabPanel id="list">
+      {selectedPoi && (() => {
+        const h = getHydration(selectedPoi);
+        const hyps = HYPOTHESES.filter((x) => x.poiIds.includes(selectedPoi.id));
+        const impact = operationalImpact(selectedPoi);
+        const measured = state.measured.includes(selectedPoi.id);
+        const post = selectedPoi.pdsInSituPosterior;
+        return (
+          <Card
+            eyebrow={`Selected target · ${selectedPoi.id}`}
+            title={selectedPoi.name}
+            icon={FlaskConical}
+            highlight
+            aside={measured ? <span className="mh-pill mh-pill--ok">Measured in the field</span> : undefined}
+          >
+            {selectedPoi.geologicalUnit && <p className="m-0 text-base text-mh-text2">{selectedPoi.geologicalUnit}</p>}
+            {h.prior && h.posterior ? (
+              <ValueWithUncertainty
+                label="Hydration"
+                unit="wt% H₂O"
+                prior={h.prior}
+                posterior={h.posterior}
+                priorSource="MRO · CRISM · 18 m/px"
+                posteriorSource="Handheld SuperCam + PIXL + SHERLOC · cm scale"
+              />
+            ) : h.prior ? (
+              <>
+                <ValueWithUncertainty label="Hydration" value={h.prior.value} sigma={h.prior.sigma} unit="wt% H₂O" kind="prior" source="MRO · CRISM · 18 m/px" />
+                <p className="m-0 text-base text-mh-text2">No in-situ measurement yet. The 12-min funnel will replace this estimate.</p>
+              </>
+            ) : (
+              <p className="m-0 text-base text-mh-text2">No orbital hydration estimate for this target.</p>
+            )}
+
+            <div className="flex flex-col gap-1">
+              <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">Linked hypothesis</span>
+              {hyps.length ? (
+                hyps.map((x) => (
+                  <span key={x.id} className="text-base">
+                    <strong>{x.id}</strong> · {x.title}
+                  </span>
+                ))
+              ) : (
+                <span className="text-base text-mh-text2">Not linked yet</span>
+              )}
+            </div>
+
+            <div className="mh-tile !gap-1.5">
+              <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">
+                Operational impact · Mission Control model
+              </span>
+              <span className="flex flex-wrap items-center gap-2 text-base">
+                <span className={`mh-pill ${CONSTRAINT_STATUS[impact.status as keyof typeof CONSTRAINT_STATUS].cls} !text-[13px]`}>
+                  {CONSTRAINT_STATUS[impact.status as keyof typeof CONSTRAINT_STATUS].label}
+                </span>
+                <span>{impact.text}</span>
+                <SimBadge />
+              </span>
+            </div>
+
+            {post?.pixl && (
+              <details>
+                <summary className="cursor-pointer text-base font-semibold text-mh-link min-h-11 flex items-center">Instrument notes</summary>
+                <dl className="m-0 flex flex-col gap-2 pt-1">
+                  {[
+                    ['SuperCam', post.supercam],
+                    ['PIXL XRF', post.pixl],
+                    ['SHERLOC Raman', post.sherloc],
+                    ['Biosignature potential', post.biosignatureRating]
+                  ]
+                    .filter(([, v]) => v)
+                    .map(([k, v]) => (
+                      <div key={k} className="flex flex-col gap-0.5">
+                        <dt className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">{k}</dt>
+                        <dd className="m-0 text-base">{v}</dd>
+                      </div>
+                    ))}
+                </dl>
+              </details>
+            )}
+          </Card>
+        );
+      })()}
       <Card
         eyebrow="Science targets"
         title="Your points of interest"
@@ -373,6 +495,7 @@ export default function ScientistPanel({
                   ) : (
                     <span className="mh-pill mh-pill--warn">Awaiting priority</span>
                   )}
+                  {state.measured.includes(poi.id) && <span className="mh-pill mh-pill--ok">Measured</span>}
                   {sols.length > 0 && (
                     <span className="mh-pill mh-pill--ok">Scheduled Sol {sols.join(', ')}</span>
                   )}
@@ -434,6 +557,51 @@ export default function ScientistPanel({
               />
             </Card>
           )}
+        </TabPanel>
+      )}
+
+      {view === 'hypotheses' && (
+        <TabPanel id="hypotheses">
+          <Card eyebrow={`Objective · ${MISSION_OBJECTIVE}`} title="Hypotheses" icon={Lightbulb} aside={<SimBadge />}>
+            <p className="m-0 text-base text-mh-text2">
+              Status from the in-situ measurements of the targets that test each hypothesis (demo rule: a result 1σ above the
+              orbital prior supports it, 1σ below weakens it).
+            </p>
+            <ul className="m-0 p-0 list-none flex flex-col gap-2">
+              {HYPOTHESES.map((hy) => {
+                const meta = HYPOTHESIS_STATUS[hypothesisStatus(hy, state.pois) as keyof typeof HYPOTHESIS_STATUS];
+                return (
+                  <li key={hy.id} className="mh-tile !gap-2">
+                    <span className="flex flex-wrap items-center gap-2">
+                      <strong className="text-base">{hy.id}</strong>
+                      <span className={`mh-pill ${meta.cls} !text-[13px]`}>{meta.label}</span>
+                    </span>
+                    <span className="text-base">{hy.title}</span>
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[14px] text-mh-text2">Tested by</span>
+                      {hy.poiIds.map((pid) => {
+                        const poi = state.pois.find((p) => p.id === pid);
+                        return poi ? (
+                          <button
+                            key={pid}
+                            type="button"
+                            onClick={() => onOpenPoiPopup(poi)}
+                            className="mh-btn bg-mh-card text-mh-text !min-h-11 !px-4 !text-[15px]"
+                          >
+                            {pid}
+                          </button>
+                        ) : (
+                          <span key={pid} className="text-[14px] text-mh-text2">
+                            {pid} (not a target yet)
+                          </span>
+                        );
+                      })}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </Card>
         </TabPanel>
       )}
     </>

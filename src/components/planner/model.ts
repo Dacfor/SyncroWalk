@@ -1,3 +1,5 @@
+import { BASE, DEMO_ASSUMPTIONS, TIME_WINDOW, computeMissionMetrics, evaluateConstraints } from './analysis.ts';
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SHARED MISSION-PLANNING MODEL
 // One store is shared by the three simulated users (scientist, mission control,
@@ -50,13 +52,16 @@ export interface PlannerState {
   pois: Poi[];
   missions: DailyMission[];
   packed: Record<string, string[]>; // astronaut checklist: missionId -> packed items
+  fieldEvents: FieldEvent[]; // in-situ discoveries & anomaly reports (crew → scientist & route model)
+  measured: string[]; // POI ids measured in the field by the astronauts
+  sepAlert: boolean; // scripted SEP / DONKI alert (demo switch in Mission Control)
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
-export const BASE = { name: 'Astronaut base', lat: 18.44907, lon: 77.45527 };
+export { BASE } from './analysis.ts';
 export const TODAY_SOL = 24;
-export const WALK_SPEED_KMH = 2.5; // demo parameter for EVA traverse on foot
-export const LATEST_RETURN = '14:30'; // demo parameter: latest return to base (LST)
+export const WALK_SPEED_KMH = DEMO_ASSUMPTIONS.walkSpeedKmhFlat; // flat-ground speed; terrain slows it down
+export const LATEST_RETURN = TIME_WINDOW.latestReturn; // demo parameter: latest return to base (LST)
 export const DAYLIGHT = { start: '08:00', end: '16:00' };
 const MARS_RADIUS_KM = 3389.5;
 
@@ -143,10 +148,10 @@ export const marsDistanceKm = (a: { lat: number; lon: number }, b: { lat: number
 };
 
 export type ScheduleItem =
-  | { kind: 'depart'; time: string }
+  | { kind: 'egress'; start: string; end: string }
   | { kind: 'travel'; from: string; to: string; km: number; minutes: number; start: string; end: string }
   | { kind: 'stop'; poi: Poi; order: number; start: string; end: string }
-  | { kind: 'return'; time: string };
+  | { kind: 'ingress'; start: string; end: string };
 
 export interface MissionPlan {
   stops: Poi[];
@@ -155,10 +160,20 @@ export interface MissionPlan {
   totalKm: number;
   walkMin: number;
   workMin: number;
-  returnTime: string;
+  returnTime: string; // EVA end, back inside the base (after ingress)
   lateReturn: boolean;
   schedule: ScheduleItem[];
   equipment: string[];
+  // Full EVA model (dose, slopes, consumables, shelter time…) and its constraint check
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  metrics: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  evaluation: any;
+}
+
+export interface PlanContext {
+  fieldEvents?: FieldEvent[];
+  sepAlert?: boolean;
 }
 
 // ── Terrain-following route geometry ────────────────────────────────────────
@@ -212,14 +227,12 @@ export const terrainLeg = (
   return out;
 };
 
-const pathLengthKm = (pts: { lat: number; lon: number }[]) =>
-  pts.slice(1).reduce((sum, p, i) => sum + marsDistanceKm(pts[i], p), 0);
-
 /**
  * Route from the base through every stop and back, following the terrain, with a timed schedule.
- * Distances and walking times are measured along the terrain-following path.
+ * Times come from the EVA model in analysis.ts: egress/ingress, walking speed reduced by slope,
+ * soft soil and not-evaluated terrain, time on site set by mission control.
  */
-export const planMission = (mission: DailyMission, pois: Poi[]): MissionPlan => {
+export const planMission = (mission: DailyMission, pois: Poi[], ctx: PlanContext = {}): MissionPlan => {
   const stops = mission.poiIds
     .map((id) => pois.find((p) => p.id === id))
     .filter((p): p is Poi => Boolean(p));
@@ -231,50 +244,46 @@ export const planMission = (mission: DailyMission, pois: Poi[]): MissionPlan => 
   });
   const path = legs.flatMap((leg, i) => (i === 0 ? leg : leg.slice(1)));
 
-  const schedule: ScheduleItem[] = [{ kind: 'depart', time: mission.startTime }];
-  let clock = toMin(mission.startTime);
-  let totalKm = 0;
-  let walkMin = 0;
-  let workMin = 0;
-  const names = [BASE.name, ...stops.map((s) => s.id), BASE.name];
+  const metrics = computeMissionMetrics(waypoints, legs, stops, mission.startTime, ctx);
+  const at = (min: number) => toHHMM(toMin(mission.startTime) + min);
+  const names = [BASE.name, ...stops.map((st) => st.id), BASE.name];
 
-  for (let i = 0; i < legs.length; i++) {
-    const km = pathLengthKm(legs[i]);
-    const minutes = Math.max(1, Math.round((km / WALK_SPEED_KMH) * 60));
-    totalKm += km;
-    walkMin += minutes;
+  const schedule: ScheduleItem[] = [{ kind: 'egress', start: at(0), end: at(DEMO_ASSUMPTIONS.egressMin) }];
+  metrics.legStats.forEach((leg: { km: number; startMin: number; endMin: number }, i: number) => {
     schedule.push({
       kind: 'travel',
       from: names[i],
       to: names[i + 1],
-      km,
-      minutes,
-      start: toHHMM(clock),
-      end: toHHMM(clock + minutes)
+      km: leg.km,
+      minutes: Math.max(1, Math.round(leg.endMin - leg.startMin)),
+      start: at(leg.startMin),
+      end: at(leg.endMin)
     });
-    clock += minutes;
     const stop = stops[i];
-    if (stop) {
-      schedule.push({ kind: 'stop', poi: stop, order: i + 1, start: toHHMM(clock), end: toHHMM(clock + stop.durationMin) });
-      clock += stop.durationMin;
-      workMin += stop.durationMin;
-    }
-  }
-  schedule.push({ kind: 'return', time: toHHMM(clock) });
+    if (stop) schedule.push({ kind: 'stop', poi: stop, order: i + 1, start: at(leg.endMin), end: at(leg.endMin + stop.durationMin) });
+  });
+  const lastArrival = metrics.legStats.length ? metrics.legStats[metrics.legStats.length - 1].endMin : DEMO_ASSUMPTIONS.egressMin;
+  schedule.push({ kind: 'ingress', start: at(lastArrival), end: metrics.endLst });
 
   return {
     stops,
     waypoints,
     path,
-    totalKm,
-    walkMin,
-    workMin,
-    returnTime: toHHMM(clock),
-    lateReturn: stops.length > 0 && clock > toMin(LATEST_RETURN),
+    totalKm: metrics.distanceKm,
+    walkMin: Math.round(metrics.walkMin),
+    workMin: metrics.stationMin,
+    returnTime: metrics.endLst,
+    lateReturn: stops.length > 0 && toMin(metrics.endLst) > toMin(LATEST_RETURN),
     schedule,
-    equipment: equipmentFor(mission, stops)
+    equipment: equipmentFor(mission, stops),
+    metrics,
+    evaluation: evaluateConstraints(metrics, { sepAlert: ctx.sepAlert })
   };
 };
+
+/** Plan of a mission with the shared context (field reports slow the route, SEP alert). */
+export const planFor = (state: PlannerState, mission: DailyMission) =>
+  planMission(mission, state.pois, { fieldEvents: state.fieldEvents, sepAlert: state.sepAlert });
 
 /** Material to bring: instruments required at each stop + sample kit + extras chosen by control. */
 export const equipmentFor = (mission: DailyMission, stops: Poi[]) => {
@@ -391,7 +400,58 @@ export const SEED_STATE: PlannerState = {
       status: 'sent'
     }
   ],
-  packed: {}
+  packed: {},
+  measured: [],
+  sepAlert: false,
+  // Candidate field events & rapid in-situ discoveries (Sol 24)
+  fieldEvents: [
+    {
+      id: 'FE-024-003',
+      ts: 'Sol 24 · 10:42 LST',
+      source: 'visorCam + Handheld PIXL/SHERLOC',
+      method: 'Rapid 12-min Field Funnel',
+      class: 'formation-interest',
+      title: 'Séítah-Delta Contact Hydrated Carbonate-Silica Vein',
+      confidence: 0.94,
+      lat: 18.4395,
+      lon: 77.4485,
+      photo: 'PDS_SHERLOC_WATSON_SOL438_VEIN',
+      description:
+        'Sub-meter fracture vein (0.4 m wide — below the 18 m/px CRISM resolution) analysed in 12 min via handheld SuperCam → abrader → PIXL/SHERLOC. Shows 11.2 wt% H2O opal-A & Mg-carbonate.',
+      actionDirective: 'Promote to a high-priority POI to update the CRISM prior → posterior.',
+      status: 'confirmed'
+    },
+    {
+      id: 'FE-024-001',
+      ts: 'Sol 24 · 10:15 LST',
+      source: 'visorCam',
+      method: 'objectDetection-demo',
+      class: 'boulder',
+      title: 'Cape Nukshak Float Boulder Apron (0.9m)',
+      confidence: 0.69,
+      lat: 18.4422,
+      lon: 77.4502,
+      photo: 'PDS_NAVCAM_LEFT_SOL422',
+      description: 'Angular basaltic float boulder field 12 m east of direct climb; low-confidence orbital detection.',
+      actionDirective: 'Boulder detected 12 m right → deviate 15 m west along the bench [demo model — not certified]',
+      status: 'needs review'
+    },
+    {
+      id: 'FE-024-002',
+      ts: 'Sol 24 · 11:02 LST',
+      source: 'manual',
+      method: 'manual',
+      class: 'soft-soil',
+      title: 'Séítah Margin Megaripple Sand Pocket',
+      confidence: 1.0,
+      lat: 18.4335,
+      lon: 77.4568,
+      photo: 'PDS_HAZCAM_SOL208_RIPPLE',
+      description: 'Unconsolidated aeolian sand dunes along the Séítah floor; high wheel slip & metabolic cost.',
+      actionDirective: 'Avoid the deep Séítah ripple trough; stay on the consolidated bench.',
+      status: 'confirmed'
+    }
+  ]
 };
 
 // ── Crew status (simulated telemetry, demo data — not real) ──────────────────
