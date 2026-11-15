@@ -62,7 +62,7 @@ export default function MissionLog({ state }: { state: PlannerState }) {
                   <br />
                   <span className={`mh-pill ${TYPE_META[e.type].cls}`}>{TYPE_META[e.type].label}</span>
                   <br />
-                  <span className="font-mono text-[11px] text-mh-text2" title={`${solDate(e.sol)} (simulated Earth date)`}>
+                  <span className="font-mono text-[12px] text-mh-text2" title={`${solDate(e.sol)} (simulated Earth date)`}>
                     {e.ts.replace(/^Sol \d+ · /, '')}
                   </span>
                 </td>

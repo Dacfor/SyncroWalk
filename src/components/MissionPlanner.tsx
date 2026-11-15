@@ -16,7 +16,6 @@ import {
   Minimize2,
   Sun,
   Moon,
-  SunMoon,
   ChevronDown,
   Bell
 } from 'lucide-react';
@@ -41,6 +40,8 @@ import {
   shelterIsochrone
 } from './planner/analysis.ts';
 import { SimBadge, fmtNum } from './planner/analysisUi.tsx';
+import { CheckBox } from './planner/ui.tsx';
+import StatusBar from './planner/StatusBar.tsx';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // §1 REAL JEZERO CRATER CONFIGURATION (FROM index_2.html & map_2.py)
@@ -192,13 +193,16 @@ const FALLBACK_M20_WAYPOINTS = [
 const THERMAL_RDBU_STOPS = ['#2166ac', '#67a9cf', '#f7f7f7', '#ef8a62', '#b2182b'];
 
 // POI flag colours by priority (fixed hex: must stay legible over Mars imagery)
+// Priority is not a status, so it gets a neutral light → dark scale (plus the stop number),
+// never the status colours.
 const POI_FLAG_COLORS = {
-  HIGH: '#E5484D',
-  MED: '#F5A524',
-  LOW: '#5B82C9',
-  NONE: '#8E8E93' // not prioritised yet by mission control
+  HIGH: '#FFFFFF',
+  MED: '#9BB8D6',
+  LOW: '#4A6FA5',
+  NONE: '#5F6B78' // not prioritised yet by mission control
 };
 const flagColor = (poi) => POI_FLAG_COLORS[poi.priority ?? 'NONE'];
+const flagInk = (color) => (color === '#FFFFFF' || color === '#9BB8D6' ? '#101923' : '#ffffff');
 
 // Route history: colour by outcome (always with the outcome written in the popup / legend)
 const EVA_OUTCOME = {
@@ -223,9 +227,9 @@ const flagSvg = (color, label = '', size = 1, measured = false) =>
   `<svg width="${30 * size}" height="${36 * size}" viewBox="0 0 30 36" aria-hidden="true">` +
   `<line x1="5" y1="3" x2="5" y2="34" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round"/>` +
   `<line x1="5" y1="3" x2="5" y2="34" stroke="#1C1C1E" stroke-width="1.6" stroke-linecap="round"/>` +
-  `<path d="M6 3.5 H27 L21.5 10.5 L27 17.5 H6 Z" fill="${color}" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/>` +
+  `<path d="M6 3.5 H27 L21.5 10.5 L27 17.5 H6 Z" fill="${color}" stroke="${flagInk(color) === '#ffffff' ? '#ffffff' : '#101923'}" stroke-width="1.5" stroke-linejoin="round"/>` +
   (label
-    ? `<text x="14.5" y="14" text-anchor="middle" font-size="9.5" font-weight="700" fill="#ffffff" font-family="DM Mono, ui-monospace, monospace">${escapeHtml(label)}</text>`
+    ? `<text x="14.5" y="14" text-anchor="middle" font-size="9.5" font-weight="700" fill="${flagInk(color)}" font-family="DM Mono, ui-monospace, monospace">${escapeHtml(label)}</text>`
     : '') +
   // In-situ measurement on file: green dot at the foot of the pole
   (measured ? `<circle cx="5" cy="31" r="4.2" fill="#56F000" stroke="#0b0f14" stroke-width="1.4"/>` : '') +
@@ -250,7 +254,7 @@ const buildPoiPopupHtml = (poi, elevM, scheduledSols, role = 'scientist') => {
     return `
     <div class="mh-poi-popup">
       <div class="mh-poi-popup__head">
-        <span class="mh-poi-popup__chip" style="background:${flagColor(poi)}">${escapeHtml(poi.priority ? `${PRIORITY_META[poi.priority].label} priority` : 'No priority yet')}</span>
+        <span class="mh-poi-popup__chip" style="background:${flagColor(poi)};color:${flagInk(flagColor(poi))}">${escapeHtml(poi.priority ? `${PRIORITY_META[poi.priority].label} priority` : 'No priority yet')}</span>
         <span class="mh-poi-popup__id">${escapeHtml(poi.id)}</span>
       </div>
       <strong class="mh-poi-popup__title">${escapeHtml(poi.name)}</strong>
@@ -272,7 +276,7 @@ const buildPoiPopupHtml = (poi, elevM, scheduledSols, role = 'scientist') => {
   return `
     <div class="mh-poi-popup">
       <div class="mh-poi-popup__head">
-        <span class="mh-poi-popup__chip" style="background:${color}">${escapeHtml(priorityLabel)}</span>
+        <span class="mh-poi-popup__chip" style="background:${color};color:${flagInk(color)}">${escapeHtml(priorityLabel)}</span>
         <span class="mh-poi-popup__id">${escapeHtml(poi.id)}</span>
       </div>
       <strong class="mh-poi-popup__title">${escapeHtml(poi.name)}</strong>
@@ -376,329 +380,8 @@ const ROLE_FILTER_PRESETS = {
 // ═══════════════════════════════════════════════════════════════════════════════
 // §2 INITIAL MISSION STATE WITH REAL PDS ANALYST'S NOTEBOOK DATA (SÉÍTAH & DELTA)
 // ═══════════════════════════════════════════════════════════════════════════════
-const INITIAL_MISSION_V5 = {
-  sol: 24,
-  demoScriptSol: 1, // 1 = Orbital Prior Baseline | 2 = Rapid Funnel Discovery + Bayesian Update | 3 = MEDA/SEP Alert
-  objective: 'Delta Phyllosilicates & Biosignatures',
-  selectedRoute: 'A', // 'A' | 'A-MOD' | 'B' | 'SHELTER'
-  roverSupport: true,
-  fusionSliderPct: 30, // 0% = Pure Orbital CRISM Prior (±34%), 100% = PDS In-Situ Posterior (±3.8%)
-  timeWindow: {
-    suggestedStart: '09:30',
-    latestReturn: '14:30',
-    evaMaxMin: 300,
-    returnBufferMin: 45,
-    notes: 'PDS MEDA Sol 455 historical thermal & dust curve — not a live forecast'
-  },
-  // Real targets from Mars 2020 PDS Analyst's Notebook (Séítah & Western Delta)
-  pois: [
-    {
-      id: 'POI-1',
-      order: 1,
-      name: 'Wildcat Ridge (Hogwallow Flats · Delta Front)',
-      feature: 'Fine-Grained Sulfate & Clay Lacustrine Mudstone',
-      priority: 'HIGH',
-      lat: 18.4452,
-      lon: 77.4512,
-      elevM: -2542,
-      sourceBadge: 'PDS M20 Notebook: Sol 455–509 (Berry Hollow Abrasion)',
-      dataConfidence: 'complete',
-      activities: ['Stand-off SuperCam', 'Surface Abrasion', 'PIXL + SHERLOC Contact', 'Core Sample'],
-      durationMin: 45,
-      roverEquivalentSols: 4,
-      astronautFunnelMin: 12,
-      orbitalPrior: {
-        mineral: 'MRO/CRISM: Fe/Mg Smectite Clay (18 m/px)',
-        hydrationEst: '4.2 wt% H2O',
-        uncertainty: '±32%'
-      },
-      pdsInSituPosterior: {
-        supercam: 'LIBS/VISIR: Hydrated Mg-Fe sulfate + clay matrix confirmed at 3.2 m',
-        abrasion: 'Berry Hollow patch (50 mm diameter, 8 mm depth, dust rind cleared)',
-        pixl: 'XRF Map: SO3 24.8 wt%, FeO 18.2 wt%, MgO 11.4 wt% ( Ca/Mg sulfate veins )',
-        sherloc: 'Deep-UV Raman & Fluorescence: 1-ring & 2-ring aromatic organics co-located with sulfates',
-        hydrationPosterior: '8.9 wt% H2O',
-        uncertaintyAfter: '±3.8%',
-        biosignatureRating: 'VERY HIGH (Skinner/Wildcat PDS Class 1)'
-      }
-    },
-    {
-      id: 'POI-2',
-      order: 2,
-      name: 'Bastide & Garde Outcrop (Séítah Unit)',
-      feature: 'Olivine Cumulate with Fe-Mg Carbonate Alteration',
-      priority: 'MED',
-      lat: 18.4285,
-      lon: 77.4608,
-      elevM: -2562,
-      sourceBadge: 'PDS M20 Notebook: Sol 200–210 (Guillaumes Abrasion)',
-      dataConfidence: 'complete',
-      activities: ['Stand-off SuperCam', 'Surface Abrasion', 'PIXL + SHERLOC Contact'],
-      durationMin: 40,
-      roverEquivalentSols: 3,
-      astronautFunnelMin: 11,
-      orbitalPrior: {
-        mineral: 'MRO/CRISM: Regional Olivine + Mg-Carbonate (18 m/px)',
-        hydrationEst: '2.5 wt% H2O',
-        uncertainty: '±36%'
-      },
-      pdsInSituPosterior: {
-        supercam: 'LIBS/IR: Fo55 cumulate olivine grains + carbonate 2.3/2.5 µm bands',
-        abrasion: 'Guillaumes abrasion patch (coarse interlocking olivine + pyroxene)',
-        pixl: 'XRF: Igneous olivine cumulate with secondary Fe-Mg carbonate & sulfate in fractures',
-        sherloc: 'UV Raman: Carbonate & perchlorate aqueous alteration products',
-        hydrationPosterior: '4.8 wt% H2O',
-        uncertaintyAfter: '±4.2%',
-        biosignatureRating: 'MODERATE (Aqueous Carbonation)'
-      }
-    },
-    {
-      id: 'POI-3',
-      order: 3,
-      name: 'Skinner Ridge (Delta Scarp Conglomerate)',
-      feature: 'Fluvial Sandstone & Boulder Conglomerate',
-      priority: 'LOW',
-      lat: 18.4518,
-      lon: 77.4595,
-      elevM: -2518,
-      sourceBadge: 'PDS M20 Notebook: Sol 490–501 (Swift Run Target)',
-      dataConfidence: 'partial',
-      activities: ['Stand-off SuperCam', 'PIXL + SHERLOC Contact'],
-      durationMin: 50,
-      roverEquivalentSols: 3,
-      astronautFunnelMin: 10,
-      postponedInSol3: false,
-      orbitalPrior: {
-        mineral: 'MRO/CRISM: Low-Ca Pyroxene + DetritalPhyllosilicate',
-        hydrationEst: '3.1 wt% H2O',
-        uncertainty: '±29%'
-      },
-      pdsInSituPosterior: {
-        supercam: 'RMI + LIBS: Diverse detrital clasts from Jezero watershed outside crater',
-        abrasion: 'Swift Run natural un-abraded / brushed surface',
-        pixl: 'XRF: Mafic & phyllosilicate-rich detrital grains cemented by sulfate',
-        sherloc: 'Raman: Detrital carbonate + hydrated phases',
-        hydrationPosterior: '5.4 wt% H2O',
-        uncertaintyAfter: '±5.1%',
-        biosignatureRating: 'HIGH (Watershed Sample Diversity)'
-      }
-    }
-  ],
-  // Candidate Field Events & Rapid In-Situ Discoveries
-  fieldEvents: [
-    {
-      id: 'FE-024-003',
-      ts: 'Sol 24 · 10:42 LST',
-      source: 'visorCam + Handheld PIXL/SHERLOC',
-      method: 'Rapid 12-min Field Funnel',
-      class: 'formation-interest',
-      title: 'Séítah-Delta Contact Hydrated Carbonate-Silica Vein',
-      confidence: 0.94,
-      lat: 18.4395,
-      lon: 77.4485,
-      photo: 'PDS_SHERLOC_WATSON_SOL438_VEIN',
-      description:
-        'Sub-meter fracture vein (0.4m wide — below 18m/px CRISM resolution) analyzed in 12 min via handheld SuperCam → Abrader → PIXL/SHERLOC. Shows 11.2 wt% H2O opal-A & Mg-carbonate.',
-      actionDirective:
-        'Promote to POI-4 (HIGH) to update CRISM prior → posterior and include in Route A-Mod.',
-      status: 'confirmed',
-      usedInNextPlan: true,
-      promotedPoiId: null
-    },
-    {
-      id: 'FE-024-001',
-      ts: 'Sol 24 · 10:15 LST',
-      source: 'visorCam',
-      method: 'objectDetection-demo',
-      class: 'boulder',
-      title: 'Cape Nukshak Float Boulder Apron (0.9m)',
-      confidence: 0.69,
-      lat: 18.4422,
-      lon: 77.4502,
-      photo: 'PDS_NAVCAM_LEFT_SOL422',
-      description:
-        'Angular basaltic float boulder field 12 m east of direct climb; low-confidence orbital detection.',
-      actionDirective: 'boulder detected 12 m right → deviate 15 m West along bench [demo model — not certified]',
-      status: 'needs review',
-      usedInNextPlan: true,
-      promotedPoiId: null
-    },
-    {
-      id: 'FE-024-002',
-      ts: 'Sol 24 · 11:02 LST',
-      source: 'manual',
-      method: 'manual',
-      class: 'soft-soil',
-      title: 'Séítah Margin Megaripple Sand Pocket',
-      confidence: 1.0,
-      lat: 18.4335,
-      lon: 77.4568,
-      photo: 'PDS_HAZCAM_SOL208_RIPPLE',
-      description: 'Unconsolidated aeolian sand dunes along Séítah floor; high rover wheel slip & metabolic cost.',
-      actionDirective: 'Avoid deep Séítah ripple trough (Route B rejected); stay on consolidated bench.',
-      status: 'confirmed',
-      usedInNextPlan: true,
-      promotedPoiId: null
-    }
-  ],
-  // Predefined EVA Route Candidates in Jezero Crater (Lat/Lon Polylines)
-  routes: {
-    A: {
-      id: 'A',
-      name: 'Route A (Three Forks → Wildcat Ridge → Bastide Margin)',
-      color: '#2D7FF9',
-      dashArray: '10, 6',
-      distanceKm: 2.15,
-      elevationGainM: 48,
-      slopeMax: 13.5,
-      dataCoveragePct: 92,
-      evaDurationMin: 235,
-      bufferMin: 65,
-      roverOk: true,
-      funnelYield: '3 Full Handheld Funnels (35 min total analysis vs 10 Rover Sols)',
-      coords: [
-        [18.4402, 77.4525], // Three Forks Base / HAB
-        [18.4435, 77.4518],
-        [18.4452, 77.4512], // POI-1 Wildcat Ridge
-        [18.4375, 77.4548],
-        [18.4285, 77.4608]  // POI-2 Bastide / Garde
-      ]
-    },
-    'A-MOD': {
-      id: 'A-MOD',
-      name: 'Route A-Mod (Posterior Fused Loop via Contact Vein POI-4)',
-      color: '#38bdf8',
-      dashArray: '12, 5',
-      distanceKm: 2.38,
-      elevationGainM: 54,
-      slopeMax: 14.2,
-      dataCoveragePct: 96,
-      evaDurationMin: 268,
-      bufferMin: 48,
-      roverOk: true,
-      funnelYield: '4 Full Handheld Funnels (Includes newly promoted POI-4 Vein)',
-      coords: [
-        [18.4402, 77.4525], // Three Forks Base / HAB
-        [18.4395, 77.4485], // POI-4 Promoted Contact Vein (FE-024-003)
-        [18.4435, 77.4488], // Cape Nukshak Bench
-        [18.4452, 77.4512], // POI-1 Wildcat Ridge
-        [18.4285, 77.4608]  // POI-2 Bastide
-      ]
-    },
-    B: {
-      id: 'B',
-      name: 'Route B (Deep Séítah Ripple Floor + Skinner Scarp Climb)',
-      color: '#35B17A',
-      dashArray: null,
-      distanceKm: 3.85,
-      elevationGainM: 92,
-      slopeMax: 19.4,
-      dataCoveragePct: 74,
-      evaDurationMin: 324,
-      bufferMin: 21, // 24 min over buffer!
-      roverOk: false,
-      funnelYield: '3 Funnels, but violates 45-min EVA return buffer & crosses 19.4° scarp',
-      coords: [
-        [18.4402, 77.4525],
-        [18.4335, 77.4568], // Soft soil ripple pocket
-        [18.4285, 77.4608], // POI-2 Bastide
-        [18.4452, 77.4512], // POI-1 Wildcat Ridge
-        [18.4518, 77.4595]  // POI-3 Skinner Ridge (Steep scarp)
-      ]
-    },
-    SHELTER: {
-      id: 'SHELTER',
-      name: 'Shelter Spur (Three Forks Alcove Rapid Return)',
-      color: '#FF6B35',
-      dashArray: '7, 4',
-      distanceKm: 1.12,
-      elevationGainM: 22,
-      slopeMax: 9.5,
-      dataCoveragePct: 99,
-      evaDurationMin: 145,
-      bufferMin: 110,
-      roverOk: true,
-      funnelYield: '2 Rapid Funnels + Emergency Basalt Scarp Radiation Shielding',
-      coords: [
-        [18.4452, 77.4512], // Wildcat Ridge
-        [18.4428, 77.4472], // Delta Basal Alcove Shelter
-        [18.4402, 77.4525]  // Three Forks HAB
-      ]
-    }
-  },
-  // Plan Versioning Audit Trail
-  activePlanVersion: 'v1',
-  acknowledgedPlanVersion: 'v1',
-  planVersions: [
-    {
-      version: 'v1',
-      sol: 'Sol 24 (Demo Sol 1)',
-      ts: 'SOL 24 · 08:30 LST',
-      trigger: 'Initial Orbital CRISM Prior Baseline',
-      approvedBy: 'Flight Dir. M. Vance & Sci Lead Dr. A. Patel',
-      routeId: 'A',
-      poiOrder: ['POI-1', 'POI-2'],
-      diffSummary: 'Plan v1 (Baseline): Route A · Wildcat Ridge → Bastide (235 min EVA)',
-      diffItems: [
-        'Route A selected (2.15 km); Route B rejected (+24 min over EVA return buffer in Séítah sand)',
-        'Targets: POI-1 (Wildcat Ridge) → POI-2 (Bastide) based on orbital CRISM prior'
-      ],
-      reason:
-        'Maximizes smectite/carbonate sampling while avoiding Séítah ripple slip hazard and 19.4° Skinner scarp.'
-    },
-    {
-      version: 'v2',
-      sol: 'Sol 24 (Demo Sol 2 — In-Situ Funnel Update)',
-      ts: 'SOL 24 · 10:55 LST',
-      trigger: '12-min Handheld PIXL/SHERLOC Funnel at FE-024-003 updated CRISM Posterior',
-      approvedBy: 'Flight Dir. M. Vance (MCC) & Sci Lead Dr. A. Patel',
-      routeId: 'A-MOD',
-      poiOrder: ['POI-4', 'POI-1', 'POI-2'],
-      diffSummary:
-        'Plan v2 received — 2 changes: (1) Promoted POI-4 Vein [HIGH] via PDS Funnel, (2) Switched to Route A-Mod',
-      diffItems: [
-        '+ PROMOTED POI-4 (Séítah-Delta Contact Vein · 11.2 wt% H2O confirmed by handheld PIXL/SHERLOC in 12 min)',
-        '↻ ROUTE ADAPTED to Route A-Mod (2.38 km, 48 min return buffer OK)'
-      ],
-      reason:
-        'In-situ handheld funnel compressed 4 rover sols into 12 minutes, shrinking local uncertainty from ±34% to ±3.8%.'
-    },
-    {
-      version: 'v3',
-      sol: 'Sol 24 (Demo Sol 3 — MEDA Dust + DONKI SEP Alert)',
-      ts: 'SOL 24 · 12:10 LST',
-      trigger: 'Scripted DONKI SEP Proton Flux (>35 PFU) + MEDA Dust Gust Front',
-      approvedBy: 'Flight Dir. M. Vance & Rad Safety Officer K. Chen',
-      routeId: 'SHELTER',
-      poiOrder: ['POI-1', 'DELTA-ALCOVE-SHELTER'],
-      diffSummary:
-        'Plan v3 EMERGENCY: EVA shortened to 145 min, divert to Delta Basal Alcove Shelter, POI-2/POI-3 postponed',
-      diffItems: [
-        '⚠ PRE-AUTHORIZED SAFETY RULE: Divert via orange Shelter Spur to Delta Basal Alcove',
-        '⏸ POSTPONED POI-2 & POI-3; secured Wildcat Ridge & Contact Vein cores'
-      ],
-      reason:
-        'Pre-authorized safety rule triggered by scripted SEP alert + MEDA pressure drop; zero autonomous guessing.'
-    }
-  ],
-  optimizerResult: {
-    chosenRoute: 'A',
-    chosenOrder: ['POI-1', 'POI-2'],
-    rejected: [
-      {
-        option: 'Route B (+1.7 km via Deep Séítah Ripples & Skinner Scarp, covers POI-3)',
-        reason:
-          'Rejected: 24 min over EVA return buffer (requires 324 min > 300 min cap [demo parameter]) & 19.4° scarp slope'
-      }
-    ]
-  },
-  weatherCard: {
-    lightWindow: '08:00–16:00 LST (Suggested EVA: 09:30–14:30)',
-    medaContext: 'PDS M20 MEDA Sol 455: -24°C · Pressure 742 Pa · Wind 5.8 m/s SE · Dust τ = 0.45',
-    radContext: 'MSL/RAD Historical Equivalent: 9.1 µGy/hr nominal (820 µGy/hr in scripted Sol 3 SEP)',
-    badge: 'PDS MEDA historical data + scripted scenario — not a live forecast'
-  }
-};
+// Map-only UI state kept from the prototype: the prior ↔ posterior fusion slider
+const INITIAL_MISSION_V5 = { fusionSliderPct: 30 };
 
 // Not-Evaluated Zones in Jezero Sector (Explicitly Amber, never green)
 const JEZERO_NOT_EVALUATED_ZONES = [
@@ -803,18 +486,16 @@ export default function MissionPlanner() {
   const fieldMapLayerRef = useRef(null);
   const [mapExpanded, setMapExpanded] = useState(false);
 
-  // Mission Hub theme: 'auto' follows the device, 'light' / 'dark' force it
+  // Theme: neutral dark by default (operations console), light kept as an option
   const [themePref, setThemePref] = useState(() => {
     try {
-      return localStorage.getItem('syncrowalk-theme') || 'auto';
+      return localStorage.getItem('syncrowalk-theme') === 'light' ? 'light' : 'dark';
     } catch {
-      return 'auto';
+      return 'dark';
     }
   });
   useEffect(() => {
-    const root = document.documentElement;
-    if (themePref === 'auto') delete root.dataset.theme;
-    else root.dataset.theme = themePref;
+    document.documentElement.dataset.theme = themePref;
     try {
       localStorage.setItem('syncrowalk-theme', themePref);
     } catch {
@@ -1021,6 +702,11 @@ export default function MissionPlanner() {
       JEZERO_RASTER_CATALOG.forEach((cfg, idx) => {
         tileLayersRef.current[cfg.id] = createRasterLayer(L, cfg, 10 + idx);
       });
+      // Data-link health (status bar): count tile loads / errors of the context imagery
+      ['ctxGlobal', 'ctxJez'].forEach((id) => {
+        tileLayersRef.current[id].on('tileload', () => tileStatsRef.current.ok++);
+        tileLayersRef.current[id].on('tileerror', () => tileStatsRef.current.err++);
+      });
 
       // Base imagery layers on by default
       tileLayersRef.current.viking.addTo(map);
@@ -1058,7 +744,7 @@ export default function MissionPlanner() {
             radius: 7,
             color: '#ffffff',
             weight: 2.5,
-            fillColor: '#FC3D21',
+            fillColor: '#4DACFF',
             fillOpacity: 0.9
           }).addTo(vectorGroupsRef.current.clickPin);
         }
@@ -1090,7 +776,20 @@ export default function MissionPlanner() {
   // Live Perseverance traverse (MMGIS). mars.nasa.gov sends no CORS header, so the browser can
   // only read it through the local FastAPI proxy: it is fetched once, when the proxy is on and the
   // traverse layer is first switched on. Otherwise the built-in PDS waypoints are used.
-  const [dataLink, setDataLink] = useState({ mmgis: 'built-in' });
+  const [dataLink, setDataLink] = useState({ mmgis: 'built-in', trek: 'checking' });
+  const tileStatsRef = useRef({ ok: 0, err: 0 });
+  // Trek / MMGIS tile health for the status bar: degraded when most tiles fail to load
+  useEffect(() => {
+    const id = setInterval(() => {
+      const { ok, err } = tileStatsRef.current;
+      const trek = ok + err === 0 ? 'checking' : err / (ok + err) > 0.6 ? 'degraded' : 'ok';
+      setDataLink((d) => (d.trek === trek ? d : { ...d, trek }));
+    }, 2500);
+    return () => clearInterval(id);
+  }, []);
+  // Last change of the shared mission state
+  const [lastUpdate, setLastUpdate] = useState(() => new Date());
+  useEffect(() => setLastUpdate(new Date()), [planner.state]);
   useEffect(() => {
     if (!useFastApiProxy || !activeFilters.filter3_pdsTargetsTraverse || liveTraverseRef.current) return;
     let cancelled = false;
@@ -1217,10 +916,10 @@ export default function MissionPlanner() {
           [18.4425, 77.4585]
         ],
         {
-          color: '#E5C04A',
+          color: '#FCE83A',
           weight: 2,
           dashArray: '6, 6',
-          fillColor: '#a855f7',
+          fillColor: '#2DCCFF',
           fillOpacity: 0.28 * priorWeight
         }
       )
@@ -1239,10 +938,10 @@ export default function MissionPlanner() {
           [18.4245, 77.4655]
         ],
         {
-          color: '#E5C04A',
+          color: '#FCE83A',
           weight: 2,
           dashArray: '6, 6',
-          fillColor: '#E5C04A',
+          fillColor: '#FCE83A',
           fillOpacity: 0.25 * priorWeight
         }
       )
@@ -1257,9 +956,9 @@ export default function MissionPlanner() {
         // High-confidence tight posterior ring around each PDS-measured outcrop
         L.circle([poi.lat, poi.lon], {
           radius: 190,
-          color: '#35B17A',
+          color: '#56F000',
           weight: 2.5,
-          fillColor: '#35B17A',
+          fillColor: '#56F000',
           fillOpacity: 0.38 * postWeight
         })
           .bindTooltip(
@@ -1277,7 +976,7 @@ export default function MissionPlanner() {
           [18.4452, 77.4512]
         ],
         {
-          color: '#38bdf8',
+          color: '#2DCCFF',
           weight: 10,
           opacity: 0.45 * postWeight
         }
@@ -1291,10 +990,10 @@ export default function MissionPlanner() {
     if (currentRole === 'astronaut' ? activeFilters.hazards : activeFilters.topographySlope) {
       JEZERO_NOT_EVALUATED_ZONES.forEach((nez) => {
         L.rectangle(nez.bounds, {
-          color: '#E5C04A',
+          color: '#FCE83A',
           weight: 2,
           dashArray: '8, 4',
-          fillColor: '#E5C04A',
+          fillColor: '#FCE83A',
           fillOpacity: 0.18
         })
           .bindTooltip(`NOT EVALUATED [${nez.id}]: ${nez.name} — ${nez.limit}`, {
@@ -1305,7 +1004,7 @@ export default function MissionPlanner() {
 
       // Slopes above the limit (same features the EVA model uses)
       SLOPE_FEATURES.filter((f) => f.slopeDeg > DEMO_ASSUMPTIONS.slopeLimitDeg).forEach((f) => {
-        L.polyline(f.coords, { color: '#E5484D', weight: 7, opacity: 0.85 })
+        L.polyline(f.coords, { color: '#FF3838', weight: 7, opacity: 0.85 })
           .bindTooltip(`${f.slopeDeg}° · ${f.name} [HiRISE DTM 1 m/px, demo value · limit ${DEMO_ASSUMPTIONS.slopeLimitDeg}°]`, { sticky: true })
           .addTo(hazardGroup);
       });
@@ -1333,14 +1032,14 @@ export default function MissionPlanner() {
         planner.state.pois.forEach((poi) => {
           const h = getHydration(poi);
           if (!h.posterior) return;
-          L.circle([poi.lat, poi.lon], { radius: 25 + h.posterior.relPct * 6, color: '#35B17A', weight: 2, fillOpacity: 0 })
+          L.circle([poi.lat, poi.lon], { radius: 25 + h.posterior.relPct * 6, color: '#56F000', weight: 2, fillOpacity: 0 })
             .bindTooltip(`In-situ uncertainty · 1σ ${fmtNum(h.posterior.relPct, 1)}% (demo value)`, { sticky: true })
             .addTo(analysisGroup);
         });
       }
       if (isSci && activeFilters.reachable) {
         shelterRings.forEach(({ shelter, ring }) => {
-          L.polygon(ring, { color: '#2D7FF9', weight: 1.5, dashArray: '5, 5', fillColor: '#2D7FF9', fillOpacity: 0.1 })
+          L.polygon(ring, { color: '#4DACFF', weight: 1.5, dashArray: '5, 5', fillColor: '#4DACFF', fillOpacity: 0.1 })
             .bindTooltip(
               `Reachable: ≤ ${DEMO_ASSUMPTIONS.sepMinWarningMin} min walk from ${shelter.name} (SEP shelter rule, demo model)`,
               { sticky: true }
@@ -1370,7 +1069,7 @@ export default function MissionPlanner() {
       }
       if (currentRole !== 'scientist' && activeFilters.shelters) {
         shelterRings.forEach(({ shelter, ring }) => {
-          L.polyline([...ring, ring[0]], { color: '#35B17A', weight: 2, dashArray: '8, 6', opacity: 0.9 })
+          L.polyline([...ring, ring[0]], { color: '#56F000', weight: 2, dashArray: '8, 6', opacity: 0.9 })
             .bindTooltip(`${DEMO_ASSUMPTIONS.sepMinWarningMin}-min return to ${shelter.name} (SEP warning time)`, { sticky: true })
             .addTo(analysisGroup);
         });
@@ -1381,7 +1080,7 @@ export default function MissionPlanner() {
       // Rock alcove shelter (the base is drawn with the route layer)
       const alcove = SHELTERS.find((sh) => sh.id === 'ALCOVE');
       if (isSci ? activeFilters.reachable : activeFilters.shelters)
-        L.circleMarker([alcove.lat, alcove.lon], { radius: 7, color: '#ffffff', weight: 2.5, fillColor: '#35B17A', fillOpacity: 1 })
+        L.circleMarker([alcove.lat, alcove.lon], { radius: 7, color: '#ffffff', weight: 2.5, fillColor: '#56F000', fillOpacity: 1 })
         .bindTooltip(`${alcove.name} · SEP shelter`, { direction: 'top' })
         .addTo(analysisGroup);
     }
@@ -1435,13 +1134,13 @@ export default function MissionPlanner() {
     travGroup.clearLayers();
     if (activeFilters.filter3_pdsTargetsTraverse && currentRole !== 'astronaut') {
       if (liveTraverseRef.current) {
-        L.geoJSON(liveTraverseRef.current, { style: { color: '#FF6B35', weight: 2.5, opacity: 0.85 } })
+        L.geoJSON(liveTraverseRef.current, { style: { color: '#C9D1DB', weight: 2, opacity: 0.9 } })
           .bindTooltip('Mars 2020 Perseverance traverse [MMGIS, live]', { sticky: true })
           .addTo(travGroup);
       } else {
         L.polyline(
           FALLBACK_M20_WAYPOINTS.map((w) => [w.lat, w.lon]),
-          { color: '#FF6B35', weight: 2.5, dashArray: '4, 4', opacity: 0.85 }
+          { color: '#C9D1DB', weight: 2, dashArray: '4, 4', opacity: 0.9 }
         )
           .bindTooltip('Mars 2020 Perseverance traverse [built-in PDS waypoints]', { sticky: true })
           .addTo(travGroup);
@@ -1450,7 +1149,7 @@ export default function MissionPlanner() {
       FALLBACK_M20_WAYPOINTS.forEach((wp) => {
         L.circleMarker([wp.lat, wp.lon], {
           radius: 4,
-          color: '#ffd166',
+          color: '#C9D1DB',
           weight: 1.5,
           fillColor: '#0b0f14',
           fillOpacity: 0.9
@@ -1478,7 +1177,7 @@ export default function MissionPlanner() {
     if (mapPlan && mapPlan.stops.length) {
       const latlngs = mapPlan.path.map((pt) => [pt.lat, pt.lon]);
       L.polyline(latlngs, { color: '#ffffff', weight: 9, opacity: 0.85 }).addTo(routeGroup);
-      L.polyline(latlngs, { color: '#2F6BD8', weight: 5, opacity: 1, dashArray: '12, 8' })
+      L.polyline(latlngs, { color: '#4DACFF', weight: 5, opacity: 1, dashArray: '12, 8' })
         .bindTooltip(
           `Sol ${mapMission.sol} EVA · ${mapPlan.totalKm.toFixed(2)} km along the terrain · back at base ${mapPlan.returnTime}`,
           { sticky: true }
@@ -1489,7 +1188,7 @@ export default function MissionPlanner() {
     // Route diverted via the field shelter (replan): always mark it, whatever the layer toggles
     if (mapPlan?.metrics.viaShelter) {
       const sh = SHELTERS.find((x) => x.id === 'ALCOVE');
-      L.circleMarker([sh.lat, sh.lon], { radius: 8, color: '#ffffff', weight: 2.5, fillColor: '#35B17A', fillOpacity: 1 })
+      L.circleMarker([sh.lat, sh.lon], { radius: 8, color: '#ffffff', weight: 2.5, fillColor: '#56F000', fillOpacity: 1 })
         .bindTooltip(`${sh.name} · SEP shelter on the route`, { permanent: true, direction: 'left', className: 'syncrowalk-tooltip' })
         .addTo(routeGroup);
     }
@@ -1517,7 +1216,7 @@ export default function MissionPlanner() {
           : activeFilters.hazards
             ? planner.state.fieldEvents.filter(isHazard)
             : [];
-    // Compact marker (◆ id); the description (class, e.g. "soft-soil", details) opens in a popup on click
+    // Compact marker (diamond + id); the description (class, e.g. "soft-soil", details) opens in a popup on click
     visibleFieldEvents.forEach((fe) => {
       const meta = FIELD_EVENT_META[fe.class] ?? FIELD_EVENT_META['formation-interest'];
       L.marker([fe.lat, fe.lon], {
@@ -1526,7 +1225,7 @@ export default function MissionPlanner() {
         alt: `${fe.id} · ${meta.label}`,
         icon: L.divIcon({
           className: '',
-          html: `<div class="mh-fe-marker" style="--fe-color:${meta.color}"><span aria-hidden="true">◆</span>${escapeHtml(fe.id)}</div>`,
+          html: `<div class="mh-fe-marker" style="--fe-color:${meta.color}"><i class="mh-diamond"></i>${escapeHtml(fe.id)}</div>`,
           iconSize: null
         })
       })
@@ -1571,7 +1270,7 @@ export default function MissionPlanner() {
         radius: 10,
         color: '#ffffff',
         weight: 3,
-        fillColor: '#FC3D21',
+        fillColor: '#4DACFF',
         fillOpacity: 1
       })
         .bindTooltip('New point of interest', { permanent: true, direction: 'top', className: 'syncrowalk-tooltip' })
@@ -1665,7 +1364,7 @@ export default function MissionPlanner() {
         title: fe.title,
         icon: L.divIcon({
           className: '',
-          html: `<div class="mh-fe-marker${isSel ? ' is-selected' : ''}" style="--fe-color:${color}"><span aria-hidden="true">◆</span>${escapeHtml(fe.id)}</div>`,
+          html: `<div class="mh-fe-marker${isSel ? ' is-selected' : ''}" style="--fe-color:${color}"><i class="mh-diamond"></i>${escapeHtml(fe.id)}</div>`,
           iconSize: null
         })
       })
@@ -1696,7 +1395,7 @@ export default function MissionPlanner() {
     });
     const latlngs = plan.path.map((pt) => [pt.lat, pt.lon]);
     L.polyline(latlngs, { color: '#ffffff', weight: 8, opacity: 0.85 }).addTo(bmap);
-    L.polyline(latlngs, { color: '#2F6BD8', weight: 4, opacity: 1 }).addTo(bmap);
+    L.polyline(latlngs, { color: '#4DACFF', weight: 4, opacity: 1 }).addTo(bmap);
     plan.stops.forEach((poi, i) => {
       L.marker([poi.lat, poi.lon], {
         interactive: false,
@@ -1709,14 +1408,14 @@ export default function MissionPlanner() {
       }).addTo(bmap);
     });
     // 40-min ring around each shelter + field hazards near the route
-    shelterRings.forEach(({ ring }) => L.polyline([...ring, ring[0]], { color: '#35B17A', weight: 2, dashArray: '8, 6', opacity: 0.9 }).addTo(bmap));
+    shelterRings.forEach(({ ring }) => L.polyline([...ring, ring[0]], { color: '#56F000', weight: 2, dashArray: '8, 6', opacity: 0.9 }).addTo(bmap));
     planner.state.fieldEvents.filter(isHazard).forEach((fe) =>
       L.circleMarker([fe.lat, fe.lon], { radius: 6, color: '#1C1C1E', weight: 2, fillColor: (FIELD_EVENT_META[fe.class] ?? FIELD_EVENT_META.boulder).color, fillOpacity: 1 })
         .bindTooltip(`${fe.id} · ${(FIELD_EVENT_META[fe.class] ?? FIELD_EVENT_META.boulder).label}`, { permanent: true, direction: 'left', className: 'syncrowalk-tooltip' })
         .addTo(bmap)
     );
     SHELTERS.forEach((sh) =>
-      L.circleMarker([sh.lat, sh.lon], { radius: 6, color: '#ffffff', weight: 2, fillColor: sh.id === 'BASE' ? '#2F6BD8' : '#35B17A', fillOpacity: 1 })
+      L.circleMarker([sh.lat, sh.lon], { radius: 6, color: '#ffffff', weight: 2, fillColor: sh.id === 'BASE' ? '#4DACFF' : '#56F000', fillOpacity: 1 })
         .bindTooltip(sh.name, { permanent: true, direction: 'right', className: 'syncrowalk-tooltip' })
         .addTo(bmap)
     );
@@ -1891,31 +1590,29 @@ export default function MissionPlanner() {
           §1 GLOBAL TOP BAR (Mission Hub navbar): BRAND + TOOLS + THEME + USER MENU
          ═══════════════════════════════════════════════════════════════════════ */}
       <header className="mh-navbar z-30">
-        <div className="px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+        <div className="px-2.5 sm:px-3 py-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           {/* Left: Brand */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-mh-accent flex items-center justify-center font-mono font-medium text-sm text-white">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-[2px] border border-mh-sep bg-mh-nav-fill flex items-center justify-center font-mono font-medium text-[12px] text-mh-nav-text">
               SW
             </div>
             <div className="flex flex-col">
-              <strong className="text-lg tracking-[0.02em] leading-tight">SYNCROWALK</strong>
-              <span className="font-mono text-[13px] text-mh-nav-text2">
-                EVA Mission Planner · Jezero Crater
-              </span>
+              <strong className="text-[14px] tracking-[0.14em] leading-tight">SYNCROWALK</strong>
+              <span className="font-mono text-[12px] leading-tight text-mh-nav-text2">EVA Mission Planner · Jezero Crater</span>
             </div>
           </div>
 
           {/* Right: CORS proxy toggle + EVIDENCE + mission.json + theme toggle + user menu (role switcher) */}
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <button
               type="button"
               onClick={() => setUseFastApiProxy((prev) => !prev)}
               aria-pressed={useFastApiProxy}
-              className="mh-btn bg-mh-nav-fill text-mh-nav-text !font-mono !text-[13px] !font-medium"
+              className="mh-btn bg-mh-nav-fill text-mh-nav-text !font-mono !text-[12px] !font-medium"
               title="Toggle FastAPI CORS proxy (http://localhost:8000/proxy?url= from map_2.py)"
             >
               <Server className="w-4 h-4" />
-              {useFastApiProxy ? 'Proxy :8000 ON' : 'Direct CORS (Trek/USGS)'}
+              {useFastApiProxy ? 'Data: proxy :8000' : 'Data: direct'}
             </button>
             <button
               type="button"
@@ -1935,13 +1632,12 @@ export default function MissionPlanner() {
               <FileJson className="w-4 h-4" />
             </button>
             {(() => {
-              // Single round toggle: Auto → Light → Dark → Auto
+              // Dark (default) ↔ Light
               const THEMES = {
-                auto: { next: 'light', label: 'Auto (follows device)', Icon: SunMoon },
                 light: { next: 'dark', label: 'Light', Icon: Sun },
-                dark: { next: 'auto', label: 'Dark', Icon: Moon }
+                dark: { next: 'light', label: 'Dark', Icon: Moon }
               };
-              const { next, label, Icon } = THEMES[themePref] ?? THEMES.auto;
+              const { next, label, Icon } = THEMES[themePref] ?? THEMES.dark;
               return (
                 <button
                   type="button"
@@ -1950,7 +1646,7 @@ export default function MissionPlanner() {
                   title={`Appearance: ${label} — click for ${THEMES[next].label}`}
                   aria-label={`Appearance: ${label}. Switch to ${THEMES[next].label}`}
                 >
-                  <Icon className="w-5 h-5" />
+                  <Icon className="w-4 h-4" />
                 </button>
               );
             })()}
@@ -1975,12 +1671,12 @@ export default function MissionPlanner() {
       {/* Toast Notification — floats, so the layout never jumps */}
       {toastMsg && (
         <div
-          className="fixed bottom-4 inset-x-4 sm:inset-x-auto sm:right-6 sm:max-w-md z-50"
+          className="fixed bottom-10 inset-x-4 sm:inset-x-auto sm:right-4 sm:max-w-md z-50"
           role="status"
           aria-live="polite"
         >
           <div className="mh-alert !bg-mh-ok-bg !text-mh-ok shadow-mh">
-            <CheckCircle2 className="w-5 h-5 shrink-0" aria-hidden="true" />
+            <CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" />
             <p className="m-0 flex-1 font-semibold">{toastMsg}</p>
             <button
               type="button"
@@ -1988,7 +1684,7 @@ export default function MissionPlanner() {
               className="mh-btn mh-btn--icon !bg-transparent !shadow-none text-mh-ok"
               aria-label="Dismiss notification"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -1997,7 +1693,7 @@ export default function MissionPlanner() {
       {/* ═══════════════════════════════════════════════════════════════════════
           WORKSPACE: FULL-HEIGHT JEZERO MAP (LEFT, OR FULL WIDTH) + SCROLLING ROLE PANEL (RIGHT)
          ═══════════════════════════════════════════════════════════════════════ */}
-      <main className="w-full flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_440px] xl:grid-cols-[minmax(0,1fr)_480px] 2xl:grid-cols-[minmax(0,1fr)_540px] gap-4 sm:gap-5 px-4 sm:px-6 py-4">
+      <main className="w-full flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_480px] xl:grid-cols-[minmax(0,1fr)_540px] 2xl:grid-cols-[minmax(0,1fr)_660px] gap-2 p-2">
         {/* LEFT: PERSISTENT LEAFLET MAP CARD */}
         <section
           ref={mapSectionRef}
@@ -2007,7 +1703,7 @@ export default function MissionPlanner() {
           aria-label="Jezero map"
         >
           {/* Map header: one compact row of layer toggles → more room for the map */}
-          <div className="px-5 py-3 flex flex-wrap items-center gap-2 border-b border-mh-sep shrink-0">
+          <div className="px-3 py-2 flex flex-wrap items-center gap-1.5 border-b border-mh-sep shrink-0">
             <span className="mh-eyebrow mr-1">Layers</span>
             {currentRole === 'scientist' && (
               <CompositionMenu
@@ -2024,7 +1720,7 @@ export default function MissionPlanner() {
               <button
                 type="button"
                 onClick={() => setShowFieldMap(true)}
-                className="mh-btn mh-btn--plain !min-h-11 !px-4 !text-[15px] ml-auto"
+                className="mh-btn mh-btn--plain !min-h-7 !px-2.5 !text-[13px] ml-auto"
                 title="Open the in-situ field discoveries (FE-…) on their own map"
               >
                 <MapPin className="w-4 h-4" aria-hidden="true" />
@@ -2074,12 +1770,12 @@ export default function MissionPlanner() {
 
             {pickMode && (
               <div className="absolute top-[4.25rem] left-3 z-20 mh-alert !py-2 shadow-mh max-w-[calc(100%-5rem)]" role="status">
-                <Crosshair className="w-5 h-5 shrink-0" aria-hidden="true" />
+                <Crosshair className="w-4 h-4 shrink-0" aria-hidden="true" />
                 <p className="m-0 font-semibold">Click on the map to place the point of interest</p>
               </div>
             )}
 
-            <div className="absolute top-3 right-3 z-20 flex flex-col gap-2">
+            <div className="absolute top-3 right-3 z-20 flex flex-col gap-1.5">
               <button
                 type="button"
                 onClick={() => setMapExpanded((v) => !v)}
@@ -2088,7 +1784,7 @@ export default function MissionPlanner() {
                 aria-label={mapExpanded ? 'Exit full-width map' : 'Show map at full width'}
                 title={mapExpanded ? 'Exit full width (Esc)' : 'Full-width map'}
               >
-                {mapExpanded ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+                {mapExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
               </button>
               <button
                 type="button"
@@ -2097,7 +1793,7 @@ export default function MissionPlanner() {
                 aria-label="Zoom in"
                 title="Zoom in (up to HiRISE z17)"
               >
-                <ZoomIn className="w-5 h-5" />
+                <ZoomIn className="w-4 h-4" />
               </button>
               <button
                 type="button"
@@ -2106,7 +1802,7 @@ export default function MissionPlanner() {
                 aria-label="Zoom out"
                 title="Zoom out"
               >
-                <ZoomOut className="w-5 h-5" />
+                <ZoomOut className="w-4 h-4" />
               </button>
               <button
                 type="button"
@@ -2115,14 +1811,14 @@ export default function MissionPlanner() {
                 aria-label="Recenter on Séítah & Western Delta"
                 title="Recenter on Séítah & Western Delta"
               >
-                <Crosshair className="w-5 h-5" />
+                <Crosshair className="w-4 h-4" />
               </button>
             </div>
           </div>
 
           {/* Map footer (compact): selected point + prior/posterior fusion */}
-          <div className="px-5 py-3 border-t border-mh-sep flex flex-wrap items-center gap-x-6 gap-y-3 shrink-0">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 flex-1">
+          <div className="px-3 py-2 border-t border-mh-sep flex flex-wrap items-center gap-x-3 gap-y-2 shrink-0">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0 flex-1">
               <span className="mh-eyebrow">
                 <MapPin className="w-4 h-4" aria-hidden="true" />
                 Point
@@ -2141,17 +1837,17 @@ export default function MissionPlanner() {
               {currentRole === 'scientist' && (
                 <button
                   type="button"
-                  className="mh-btn mh-btn--tinted !min-h-11 !px-4"
+                  className="mh-btn mh-btn--tinted !min-h-7 !px-2.5"
                   onClick={() => setDraftPoint({ lat: clickedPoint.lat, lon: clickedPoint.lon })}
                   title="Use the selected point for a new point of interest"
                 >
-                  <PlusCircle className="w-5 h-5" /> New POI here
+                  <PlusCircle className="w-4 h-4" /> New POI here
                 </button>
               )}
             </div>
 
             {activeFilters.filter1_spectralFusion && currentRole !== 'astronaut' && (
-              <div className="flex items-center gap-3 min-w-[260px] flex-1">
+              <div className="flex items-center gap-2 min-w-[260px] flex-1">
                 <label htmlFor="fusion-slider" className="mh-eyebrow shrink-0">
                   Fusion
                 </label>
@@ -2162,7 +1858,7 @@ export default function MissionPlanner() {
                   max="100"
                   value={mission.fusionSliderPct}
                   onChange={(e) => setMission((prev) => ({ ...prev, fusionSliderPct: Number(e.target.value) }))}
-                  className="flex-1 h-11 cursor-pointer"
+                  className="flex-1 h-7 cursor-pointer"
                   aria-valuetext={`${mission.fusionSliderPct}% PDS posterior`}
                   title="CRISM prior (σ ±34%) ↔ PDS posterior (σ ±3.8%)"
                 />
@@ -2174,7 +1870,7 @@ export default function MissionPlanner() {
 
         {/* RIGHT: ROLE-SPECIFIC DECISION DECK (scrolls with the page) */}
         <aside
-          className={`flex flex-col gap-5 sm:gap-6 min-w-0 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:pb-2 ${mapExpanded ? 'lg:hidden' : ''}`}
+          className={`flex flex-col gap-3 sm:gap-3 min-w-0 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:pb-2 ${mapExpanded ? 'lg:hidden' : ''}`}
           aria-label="Decision panel"
         >
           {/* Notifications from the other roles (e.g. "Sol N debrief received") */}
@@ -2182,7 +1878,7 @@ export default function MissionPlanner() {
             .filter((n) => n.text[currentRole] && !n.seenBy.includes(currentRole))
             .map((n) => (
               <div key={n.id} className="mh-notice" role="status">
-                <Bell className="w-5 h-5 shrink-0" aria-hidden="true" />
+                <Bell className="w-4 h-4 shrink-0" aria-hidden="true" />
                 <div className="flex-1 min-w-0 flex flex-col">
                   <strong>{n.title}</strong>
                   <span>{n.text[currentRole]}</span>
@@ -2258,6 +1954,24 @@ export default function MissionPlanner() {
         </aside>
       </main>
 
+      {/* Fixed status bar: clocks, sol, scenario, plan of the day, data links, last update */}
+      {(() => {
+        const st = planner.state;
+        const today = st.missions.find((m) => m.sol === st.todaySol);
+        const verdict = today && today.poiIds.length ? planFor(st, today).evaluation.overall : 'none';
+        return (
+          <StatusBar
+            sol={st.todaySol}
+            scenario={scenarioById(st.scenarioId).label}
+            planVersion={today ? `v${today.version ?? 1} · ${today.status === 'sent' ? 'sent' : today.status === 'changed' ? 'changed, not sent' : 'draft'}` : 'none'}
+            planVerdict={verdict}
+            trek={dataLink.trek}
+            mmgis={dataLink.mmgis}
+            lastUpdate={lastUpdate}
+          />
+        );
+      })()}
+
       {/* EVA BRIEFING (Astronaut): sent mission only — printable (window.print) */}
       {showBriefing && briefingMission && (
         <EvaBriefing
@@ -2294,7 +2008,7 @@ export default function MissionPlanner() {
         const linked = (id) => planner.state.pois.find((p) => p.fromFieldEventId === id)?.id;
         return (
           <div
-            className="fixed inset-0 z-[1200] bg-black/50 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6"
+            className="fixed inset-0 z-[1200] bg-black/50 flex items-center justify-center p-2 sm:p-3"
             onClick={() => setShowFieldMap(false)}
           >
             <div
@@ -2304,10 +2018,10 @@ export default function MissionPlanner() {
               onClick={(e) => e.stopPropagation()}
               className="bg-mh-card rounded-mh-lg shadow-mh w-full max-w-[1400px] h-[92vh] flex flex-col overflow-hidden"
             >
-              <div className="px-5 py-4 flex items-start justify-between gap-3 border-b border-mh-sep shrink-0">
+              <div className="px-3 py-2.5 flex items-start justify-between gap-2 border-b border-mh-sep shrink-0">
                 <div className="flex flex-col gap-1 min-w-0">
-                  <span className="mh-eyebrow mh-eyebrow--line">Field discoveries</span>
-                  <h2 id="field-map-title" className="m-0 text-[22px] leading-tight font-bold">
+                  <span className="mh-eyebrow">Field discoveries</span>
+                  <h2 id="field-map-title" className="m-0 text-[15px] leading-tight font-bold">
                     In-situ discoveries map
                   </h2>
                   <p className="m-0 text-base text-mh-text2">
@@ -2321,12 +2035,12 @@ export default function MissionPlanner() {
                   className="mh-btn mh-btn--icon bg-mh-fill text-mh-text shrink-0"
                   aria-label="Close"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-4 h-4" />
                 </button>
               </div>
               <div className="flex-1 min-h-0 grid grid-cols-1 grid-rows-[minmax(260px,45%)_1fr] lg:grid-rows-1 lg:grid-cols-[minmax(0,1fr)_420px]">
                 <div ref={fieldMapContainerRef} className="w-full h-full min-h-0 z-10" />
-                <div className="min-h-0 overflow-y-auto p-5 flex flex-col gap-4 border-t lg:border-t-0 lg:border-l border-mh-sep">
+                <div className="min-h-0 overflow-y-auto p-3 flex flex-col gap-2.5 border-t lg:border-t-0 lg:border-l border-mh-sep">
                   <DiscoveryList
                     fieldEvents={planner.state.fieldEvents}
                     selectedId={fe.id}
@@ -2336,7 +2050,7 @@ export default function MissionPlanner() {
                     }}
                     linkedPoiId={linked}
                   />
-                  <h3 className="m-0 text-[20px] leading-tight font-bold">{fe.title}</h3>
+                  <h3 className="m-0 text-[15px] leading-tight font-bold">{fe.title}</h3>
                   <DiscoveryDetail
                     fe={fe}
                     linkedPoiId={linked(fe.id)}
@@ -2365,7 +2079,7 @@ export default function MissionPlanner() {
          ═══════════════════════════════════════════════════════════════════════ */}
       {showEvidenceDrawer && (
         <div
-          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex justify-end"
+          className="fixed inset-0 z-50 bg-black/50 flex justify-end"
           onClick={() => setShowEvidenceDrawer(false)}
         >
           <div
@@ -2373,12 +2087,12 @@ export default function MissionPlanner() {
             aria-modal="true"
             aria-labelledby="evidence-title"
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-xl bg-mh-bg sm:rounded-l-mh-xl h-full flex flex-col gap-4 p-5 sm:p-6 overflow-hidden shadow-mh"
+            className="w-full max-w-xl bg-mh-bg sm:rounded-l-mh-xl h-full flex flex-col gap-2.5 p-3 sm:p-3 overflow-hidden shadow-mh"
           >
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start justify-between gap-2">
               <div className="flex flex-col gap-1">
-                <span className="mh-eyebrow mh-eyebrow--line">Evidence</span>
-                <h2 id="evidence-title" className="m-0 text-[22px] leading-tight font-bold">
+                <span className="mh-eyebrow">Evidence</span>
+                <h2 id="evidence-title" className="m-0 text-[15px] leading-tight font-bold">
                   NASA Trek, USGS & PDS sources
                 </h2>
                 <p className="m-0 text-base text-mh-text2">
@@ -2391,14 +2105,14 @@ export default function MissionPlanner() {
                 className="mh-btn mh-btn--icon bg-mh-card text-mh-text shrink-0"
                 aria-label="Close"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto flex flex-col gap-3 -mx-1 px-1">
+            <div className="flex-1 overflow-y-auto flex flex-col gap-2 -mx-1 px-1">
               <span className="mh-eyebrow">Raster layers</span>
               {JEZERO_RASTER_CATALOG.map((lyr) => (
-                <div key={lyr.id} className="p-4 rounded-mh-md bg-mh-card shadow-mh flex items-start justify-between gap-3">
+                <div key={lyr.id} className="p-2.5 rounded-mh-md bg-mh-card shadow-mh flex items-start justify-between gap-2">
                   <div className="flex flex-col gap-1 min-w-0">
                     <strong className="text-base">{lyr.name}</strong>
                     <span className="text-base text-mh-text2">
@@ -2411,7 +2125,7 @@ export default function MissionPlanner() {
 
               <span className="mh-eyebrow mt-3">Composition (CRISM MTRDR browse products)</span>
               {COMPOSITION_LAYERS.filter((l) => l.scenes.length).map((lyr) => (
-                <div key={lyr.id} className="p-4 rounded-mh-md bg-mh-card shadow-mh flex flex-col gap-1">
+                <div key={lyr.id} className="p-2.5 rounded-mh-md bg-mh-card shadow-mh flex flex-col gap-1">
                   <strong className="text-base">{lyr.label}</strong>
                   <span className="text-base text-mh-text2">
                     {lyr.source} · {lyr.resolution} · {lyr.rgb}
@@ -2425,7 +2139,7 @@ export default function MissionPlanner() {
 
               <span className="mh-eyebrow mt-3">Not-evaluated zones</span>
               {JEZERO_NOT_EVALUATED_ZONES.map((z) => (
-                <div key={z.id} className="p-4 rounded-mh-md bg-mh-card shadow-mh flex flex-col gap-2">
+                <div key={z.id} className="p-2.5 rounded-mh-md bg-mh-card shadow-mh flex flex-col gap-1.5">
                   <span className="mh-pill mh-pill--warn self-start">Not evaluated · {z.id}</span>
                   <strong className="text-base">{z.name}</strong>
                   <span className="text-base text-mh-text2">{z.reason}</span>
@@ -2442,7 +2156,7 @@ export default function MissionPlanner() {
          ═══════════════════════════════════════════════════════════════════════ */}
       {showJsonModal && (
         <div
-          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-2.5"
           onClick={() => setShowJsonModal(false)}
         >
           <div
@@ -2450,12 +2164,12 @@ export default function MissionPlanner() {
             aria-modal="true"
             aria-labelledby="json-title"
             onClick={(e) => e.stopPropagation()}
-            className="bg-mh-card rounded-mh-lg max-w-3xl w-full max-h-[85vh] flex flex-col gap-4 p-5 sm:p-6 shadow-mh"
+            className="bg-mh-card rounded-mh-lg max-w-3xl w-full max-h-[85vh] flex flex-col gap-2.5 p-3 sm:p-3 shadow-mh"
           >
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start justify-between gap-2">
               <div className="flex flex-col gap-1">
                 <span className="mh-eyebrow">Shared state contract</span>
-                <h2 id="json-title" className="m-0 text-[22px] leading-tight font-bold">
+                <h2 id="json-title" className="m-0 text-[15px] leading-tight font-bold">
                   mission-plan.json
                 </h2>
               </div>
@@ -2465,10 +2179,10 @@ export default function MissionPlanner() {
                 className="mh-btn mh-btn--icon bg-mh-fill text-mh-text shrink-0"
                 aria-label="Close"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
-            <pre className="m-0 p-4 rounded-mh-md bg-mh-fill text-base font-mono overflow-auto flex-1 select-text">
+            <pre className="m-0 p-2.5 rounded-mh-md bg-mh-fill text-base font-mono overflow-auto flex-1 select-text">
               {JSON.stringify({ base: BASE, ...planner.state }, null, 2)}
             </pre>
             <button
@@ -2506,9 +2220,9 @@ function FilterToggle({ on, onClick, hint, children }) {
       aria-pressed={on}
       onClick={onClick}
       title={hint}
-      className={`mh-btn !min-h-11 !px-4 !text-[15px] ${on ? 'mh-btn--tinted' : 'bg-mh-fill text-mh-text2'}`}
+      className={`mh-btn mh-toggle ${on ? 'is-on' : ''}`}
     >
-      {on ? <CheckCircle2 className="w-5 h-5" aria-hidden="true" /> : <span className="w-5 h-5 rounded-full border-2 border-current" aria-hidden="true" />}
+      <CheckBox on={on} />
       <span>{children}</span>
       <span className="sr-only">{on ? '(on)' : '(off)'}</span>
     </button>
@@ -2544,7 +2258,7 @@ function DotSwatch({ color, ring = '#ffffff', size = 14 }) {
   return (
     <span
       className="rounded-full shrink-0"
-      style={{ width: size, height: size, background: color, border: `2px solid ${ring}`, boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }}
+      style={{ width: size, height: size, background: color, border: `2px solid ${ring}` }}
       aria-hidden="true"
     />
   );
@@ -2552,7 +2266,7 @@ function DotSwatch({ color, ring = '#ffffff', size = 14 }) {
 
 function LegendRow({ swatch, children }) {
   return (
-    <li className="flex items-center gap-2">
+    <li className="flex items-center gap-1.5">
       <span className="w-7 flex justify-center shrink-0">{swatch}</span>
       <span className="min-w-0">{children}</span>
     </li>
@@ -2562,7 +2276,7 @@ function LegendRow({ swatch, children }) {
 function LegendSection({ title, children }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">{title}</span>
+      <span className="mh-stat-label">{title}</span>
       <ul className="m-0 p-0 list-none flex flex-col gap-1.5">{children}</ul>
     </div>
   );
@@ -2585,17 +2299,17 @@ function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex items-center justify-between gap-2 min-h-11 px-3 bg-transparent border-0 cursor-pointer text-mh-text font-semibold text-[15px]"
+        className="flex items-center justify-between gap-1.5 min-h-7 px-2 bg-transparent border-0 cursor-pointer text-mh-text font-semibold text-[13px]"
       >
-        <span className="flex items-center gap-2">
+        <span className="flex items-center gap-1.5">
           <Layers className="w-4 h-4" aria-hidden="true" />
           Legend
         </span>
-        <ChevronDown className={`w-5 h-5 text-mh-text2 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
+        <ChevronDown className={`w-4 h-4 text-mh-text2 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
       </button>
 
       {open && (
-        <div className="px-3 pb-3 flex flex-col gap-3 overflow-y-auto text-[14px] leading-snug">
+        <div className="px-2 pb-2 flex flex-col gap-2 overflow-y-auto text-[12px] leading-snug">
           <LegendSection title="Points of interest">
             {[
               ['HIGH', 'High priority'],
@@ -2615,12 +2329,12 @@ function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe
 
           <LegendSection title="Base & route">
             <LegendRow swatch={<DotSwatch color="var(--mh-primary)" size={18} />}>Astronaut base (shelter)</LegendRow>
-            {showShelters && <LegendRow swatch={<DotSwatch color="#35B17A" size={14} />}>Delta basal alcove (SEP shelter)</LegendRow>}
+            {showShelters && <LegendRow swatch={<DotSwatch color="#56F000" size={14} />}>Delta basal alcove (SEP shelter)</LegendRow>}
             {!isSci && activeFilters.shelters && (
-              <LegendRow swatch={<LineSwatch color="#35B17A" dash="5 4" width={2} />}>40-min return to a shelter</LegendRow>
+              <LegendRow swatch={<LineSwatch color="#56F000" dash="5 4" width={2} />}>40-min return to a shelter</LegendRow>
             )}
             {routeVisible && (
-              <LegendRow swatch={<LineSwatch color="#2F6BD8" dash="5 3" width={3} casing />}>
+              <LegendRow swatch={<LineSwatch color="#4DACFF" dash="5 3" width={3} casing />}>
                 Daily EVA route, following the terrain
               </LegendRow>
             )}
@@ -2628,13 +2342,13 @@ function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe
 
           {showFusion && (
             <LegendSection title="CRISM prior ↔ PDS posterior">
-              <LegendRow swatch={<AreaSwatch stroke="#E5C04A" fill="#a855f7" dash="4 3" />}>
+              <LegendRow swatch={<AreaSwatch stroke="#FCE83A" fill="#2DCCFF" dash="4 3" />}>
                 Orbital mineral zone (CRISM prior, σ ±32–36%)
               </LegendRow>
-              <LegendRow swatch={<AreaSwatch stroke="#35B17A" fill="#35B17A" round />}>
+              <LegendRow swatch={<AreaSwatch stroke="#56F000" fill="#56F000" round />}>
                 In-situ measurement (PDS posterior)
               </LegendRow>
-              <LegendRow swatch={<LineSwatch color="#38bdf8" width={7} />}>Hydrated vein corridor</LegendRow>
+              <LegendRow swatch={<LineSwatch color="#2DCCFF" width={7} />}>Hydrated vein corridor</LegendRow>
             </LegendSection>
           )}
 
@@ -2666,11 +2380,11 @@ function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe
             <LegendSection title="THEMIS night thermal">
               <li className="flex flex-col gap-1">
                 <span
-                  className="h-2.5 rounded-full"
+                  className="h-2.5 rounded-[2px]"
                   aria-hidden="true"
                   style={{ background: `linear-gradient(90deg, ${THERMAL_RDBU_STOPS.join(', ')})` }}
                 />
-                <span className="flex justify-between gap-2 text-mh-text2">
+                <span className="flex justify-between gap-1.5 text-mh-text2">
                   <span>Cold · sand/dust</span>
                   <span>Warm · bedrock</span>
                 </span>
@@ -2680,8 +2394,8 @@ function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe
 
           {showHazards && (
             <LegendSection title="Slope & not-evaluated">
-              <LegendRow swatch={<LineSwatch color="#E5484D" width={5} />}>Slope &gt; 15° (demo threshold)</LegendRow>
-              <LegendRow swatch={<AreaSwatch stroke="#E5C04A" fill="#E5C04A" dash="5 3" />}>
+              <LegendRow swatch={<LineSwatch color="#FF3838" width={5} />}>Slope &gt; 15° (demo threshold)</LegendRow>
+              <LegendRow swatch={<AreaSwatch stroke="#FCE83A" fill="#FCE83A" dash="5 3" />}>
                 Not evaluated — no safety claim
               </LegendRow>
             </LegendSection>
@@ -2706,11 +2420,11 @@ function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe
 
           {showTraverse && (
             <LegendSection title="Perseverance traverse">
-              <LegendRow swatch={<LineSwatch color="#FF6B35" dash="3 3" width={2.5} />}>Rover path (MMGIS / PDS)</LegendRow>
+              <LegendRow swatch={<LineSwatch color="#C9D1DB" dash="3 3" width={2} />}>Rover path (MMGIS / PDS)</LegendRow>
               <LegendRow
                 swatch={
                   <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-                    <circle cx="6" cy="6" r="4" fill="#0b0f14" stroke="#ffd166" strokeWidth="1.5" />
+                    <circle cx="6" cy="6" r="4" fill="#0b0f14" stroke="#C9D1DB" strokeWidth="1.5" />
                   </svg>
                 }
               >
@@ -2722,12 +2436,12 @@ function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe
           {isSci && activeFilters.uncertainty && (
             <LegendSection title="Uncertainty (1σ)">
               <LegendRow swatch={<AreaSwatch stroke="#8E8E93" fill="#8E8E93" dash="2 4" />}>Orbital estimate · denser = less certain</LegendRow>
-              <LegendRow swatch={<AreaSwatch stroke="#35B17A" fill="none" round />}>In-situ measurement · tight ring</LegendRow>
+              <LegendRow swatch={<AreaSwatch stroke="#56F000" fill="none" round />}>In-situ measurement · tight ring</LegendRow>
             </LegendSection>
           )}
           {isSci && activeFilters.reachable && (
             <LegendSection title="Reachable area">
-              <LegendRow swatch={<AreaSwatch stroke="#2D7FF9" fill="#2D7FF9" dash="4 4" />}>
+              <LegendRow swatch={<AreaSwatch stroke="#4DACFF" fill="#4DACFF" dash="4 4" />}>
                 ≤ {DEMO_ASSUMPTIONS.sepMinWarningMin} min walk from a shelter
               </LegendRow>
             </LegendSection>
@@ -2735,8 +2449,8 @@ function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe
           {isSci && activeFilters.uncertainty && (
             <LegendSection title="Residual vs orbital prior">
               <LegendRow swatch={<AreaSwatch stroke="#8E8E93" fill="#8E8E93" round />}>Confirms prior (&lt; 1σ)</LegendRow>
-              <LegendRow swatch={<AreaSwatch stroke="#E5C04A" fill="#E5C04A" round />}>Partly contradicts (1–2σ)</LegendRow>
-              <LegendRow swatch={<AreaSwatch stroke="#FF6B35" fill="#FF6B35" round />}>Contradicts (&gt; 2σ)</LegendRow>
+              <LegendRow swatch={<AreaSwatch stroke="#FCE83A" fill="#FCE83A" round />}>Partly contradicts (1–2σ)</LegendRow>
+              <LegendRow swatch={<AreaSwatch stroke="#FFB302" fill="#FFB302" round />}>Contradicts (&gt; 2σ)</LegendRow>
             </LegendSection>
           )}
 
@@ -2745,14 +2459,14 @@ function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe
               Object.entries(FIELD_EVENT_META)
                 .filter(([cls]) => isSci || isHazard({ class: cls }))
                 .map(([, { color: c, label }]) => (
-                  <LegendRow key={label} swatch={<span className="font-mono text-[15px] leading-none" style={{ color: c }}>◆</span>}>
+                  <LegendRow key={label} swatch={<i className="mh-diamond" style={{ '--fe-color': c }} />}>
                     {label} {isSci ? '(field discovery)' : '(field hazard)'}
                   </LegendRow>
                 ))}
             {showDraft && (
-              <LegendRow swatch={<DotSwatch color="#FC3D21" />}>New point of interest (draft)</LegendRow>
+              <LegendRow swatch={<DotSwatch color="#4DACFF" />}>New point of interest (draft)</LegendRow>
             )}
-            <LegendRow swatch={<DotSwatch color="#FC3D21" size={12} />}>Inspected point (map click)</LegendRow>
+            <LegendRow swatch={<DotSwatch color="#4DACFF" size={12} />}>Inspected point (map click)</LegendRow>
           </LegendSection>
         </div>
       )}

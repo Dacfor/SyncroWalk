@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Clock,
   HeartPulse,
+  House,
   MapPin,
   PlusCircle,
   Radio,
@@ -144,11 +145,11 @@ export default function ControlPanel({
         value={view}
         onChange={setView}
         tabs={[
-          { id: 'pois', label: 'Points', icon: MapPin, badge: toPrioritise },
+          { id: 'pois', label: 'POIs', icon: MapPin, badge: toPrioritise },
           { id: 'calendar', label: 'Calendar', icon: CalendarDays, badge: pending },
-          { id: 'route', label: mission ? `Route · Sol ${mission.sol}` : 'Route', icon: Route },
+          { id: 'route', label: 'Route', icon: Route },
           { id: 'crew', label: 'Crew', icon: Users, badge: crewToWatch },
-          { id: 'environment', label: 'Environ.', icon: Radio, badge: state.sepAlert ? '!' : undefined },
+          { id: 'environment', label: 'Env', icon: Radio, badge: state.sepAlert ? '!' : undefined },
           { id: 'log', label: 'Log', icon: ScrollText }
         ]}
       />
@@ -158,9 +159,9 @@ export default function ControlPanel({
         .filter(({ m }) => !(view === 'route' && m.id === selectedMissionId))
         .map(({ m, p }) => (
           <div key={m.id} className="mh-nogo" role="alert">
-            <ShieldAlert className="w-6 h-6 shrink-0" aria-hidden="true" />
+            <ShieldAlert className="w-4 h-4 shrink-0" aria-hidden="true" />
             <div className="flex-1 min-w-0 flex flex-col">
-              <strong className="text-[17px]">
+              <strong className="text-[13px]">
                 NO-GO · Sol {m.sol} plan v{missionVersion(m)}
                 {m.status === 'sent' ? ' (already sent: the crew is told not to leave)' : ''}
               </strong>
@@ -181,7 +182,7 @@ export default function ControlPanel({
         subtitle="Select a point to set its priority, instruments and time on site."
         icon={MapPin}
         aside={
-          <span className={`mh-pill ${pois.some((p) => !p.priority) ? 'mh-pill--warn' : 'mh-pill--ok'}`}>
+          <span className={`mh-pill ${pois.some((p) => !p.priority) ? 'mh-pill--info' : 'mh-pill--ok'}`}>
             {pois.filter((p) => !p.priority).length} to prioritise
           </span>
         }
@@ -189,7 +190,7 @@ export default function ControlPanel({
         {pois.length === 0 && (
           <p className="m-0 text-base text-mh-text2">The scientist has not defined any point of interest yet.</p>
         )}
-        <ul className="m-0 p-0 list-none flex flex-col gap-2">
+        <ul className="m-0 p-0 list-none flex flex-col gap-1.5">
           {pois.map((poi) => {
             const open = selectedPoiId === poi.id;
             return (
@@ -201,19 +202,19 @@ export default function ControlPanel({
                     setSelectedPoiId(open ? null : poi.id);
                     if (!open) onFocusPoi(poi);
                   }}
-                  className="w-full min-h-11 p-4 text-left bg-transparent border-0 cursor-pointer text-mh-text flex flex-col gap-2"
+                  className="w-full min-h-7 p-2.5 text-left bg-transparent border-0 cursor-pointer text-mh-text flex flex-col gap-1.5"
                 >
-                  <span className="flex items-start justify-between gap-3">
+                  <span className="flex items-start justify-between gap-2">
                     <span className="flex flex-col gap-0.5 min-w-0">
-                      <span className="font-mono text-[13px] text-mh-text2">{poi.id}</span>
+                      <span className="font-mono text-[12px] text-mh-text2">{poi.id}</span>
                       <strong className="text-base">{poi.name}</strong>
                     </span>
                     {poi.priority ? (
-                      <span className={`mh-pill shrink-0 ${PRIORITY_META[poi.priority].cls}`}>
+                      <span className={`shrink-0 ${PRIORITY_META[poi.priority].cls}`}>
                         {PRIORITY_META[poi.priority].label}
                       </span>
                     ) : (
-                      <span className="mh-pill mh-pill--warn shrink-0">No priority</span>
+                      <span className="mh-pill mh-pill--info shrink-0">No priority</span>
                     )}
                   </span>
                   <span className="text-base text-mh-text2">
@@ -223,7 +224,7 @@ export default function ControlPanel({
                 </button>
 
                 {open && (
-                  <div className="px-4 pb-4 flex flex-col gap-4">
+                  <div className="px-2.5 pb-2.5 flex flex-col gap-2.5">
                     <div className="mh-tile !bg-mh-card">
                       <span className="mh-eyebrow">Scientist request</span>
                       <p className="m-0 text-base">{poi.infoToCollect}</p>
@@ -234,8 +235,8 @@ export default function ControlPanel({
                       </p>
                     </div>
 
-                    <div className="flex flex-col gap-2">
-                      <span className="mh-label !text-base">Priority</span>
+                    <div className="flex flex-col gap-1.5">
+                      <span className="mh-label">Priority</span>
                       <Segmented
                         label={`Priority of ${poi.id}`}
                         value={(poi.priority ?? 'NONE') as Priority | 'NONE'}
@@ -249,9 +250,9 @@ export default function ControlPanel({
                       />
                     </div>
 
-                    <div className="flex flex-col gap-2">
-                      <span className="mh-label !text-base">Instruments for the experiments</span>
-                      <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-col gap-1.5">
+                      <span className="mh-label">Instruments for the experiments</span>
+                      <div className="flex flex-wrap gap-1.5">
                         {INSTRUMENTS.map((ins) => (
                           <Chip
                             key={ins.id}
@@ -298,7 +299,7 @@ export default function ControlPanel({
         subtitle="One EVA per Sol. Every route starts and ends at the astronaut base."
         icon={CalendarDays}
       >
-        <ul className="m-0 p-0 list-none flex flex-col gap-2">
+        <ul className="m-0 p-0 list-none flex flex-col gap-1.5">
           {missions.map((m) => {
             const p = planFor(state, m);
             const sel = m.id === selectedMissionId;
@@ -310,16 +311,16 @@ export default function ControlPanel({
                   onClick={() => openMission(m.id)}
                   aria-current={sel ? 'true' : undefined}
                   title="Open the route editor" 
-                  className={`w-full p-4 rounded-mh-md border-2 text-left cursor-pointer text-mh-text flex flex-col gap-2 ${
+                  className={`w-full p-2.5 rounded-mh-md border-2 text-left cursor-pointer text-mh-text flex flex-col gap-1.5 ${
                     sel ? 'bg-mh-fill-blue border-mh-primary' : 'bg-mh-fill border-transparent'
                   }`}
                 >
-                  <span className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="flex flex-wrap items-center justify-between gap-1.5">
                     <strong className="text-base">
                       Sol {m.sol}
                       {m.sol === state.todaySol ? ' · Today' : ''} · plan v{missionVersion(m)}
                     </strong>
-                    <span className="flex flex-wrap gap-2">
+                    <span className="flex flex-wrap gap-1.5">
                       {p.stops.length > 0 && (
                         <span className={`mh-pill ${verdict.cls}`}>
                           {p.evaluation.overall === 'violated' ? 'NO-GO' : p.evaluation.overall === 'watch' ? 'GO · watch' : 'GO'}
@@ -331,7 +332,7 @@ export default function ControlPanel({
                   <span className="text-base text-mh-text2">
                     {m.startTime} → {p.returnTime} LST · {p.stops.length} stop{p.stops.length === 1 ? "" : "s"} · {p.totalKm.toFixed(2)} km
                   </span>
-                  {p.stops.length > 0 && <span className="text-[14px] text-mh-text2">{missionReason(p.evaluation, p.metrics)}</span>}
+                  {p.stops.length > 0 && <span className="text-[12px] text-mh-text2">{missionReason(p.evaluation, p.metrics)}</span>}
                 </button>
               </li>
             );
@@ -339,13 +340,13 @@ export default function ControlPanel({
         </ul>
         {missions.length === 0 && <p className="m-0 text-base text-mh-text2">No missions planned yet.</p>}
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1.5">
           <button
             type="button"
             className="mh-btn mh-btn--tinted"
             onClick={() => openMission(store.addMission())}
           >
-            <PlusCircle className="w-5 h-5" /> New daily mission
+            <PlusCircle className="w-4 h-4" /> New daily mission
           </button>
           <button
             type="button"
@@ -357,13 +358,13 @@ export default function ControlPanel({
               onToast(`Calendar sent to the astronauts (${n} updated mission${n === 1 ? '' : 's'})`);
             }}
           >
-            <Send className="w-5 h-5" />
+            <Send className="w-4 h-4" />
             {pending === 0 ? 'Calendar up to date' : `Send calendar to astronauts (${pending})`}
           </button>
         </div>
         {pendingNoGo > 0 && (
           <div className="mh-alert !bg-mh-crit-bg !text-mh-crit" role="alert">
-            <AlertTriangle className="w-5 h-5 shrink-0" aria-hidden="true" />
+            <AlertTriangle className="w-4 h-4 shrink-0" aria-hidden="true" />
             <p className="m-0 flex-1">
               {pendingNoGo} unsent mission{pendingNoGo === 1 ? ' is' : 's are'} NO-GO. Open {pendingNoGo === 1 ? 'it' : 'them'} and fix the
               binding constraint before sending the calendar.
@@ -381,12 +382,12 @@ export default function ControlPanel({
             <p className="m-0 text-base text-mh-text2">
               Open a daily mission from the calendar, or create a new one, to plan its route.
             </p>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1.5">
               <button type="button" className="mh-btn mh-btn--tinted" onClick={() => setView('calendar')}>
-                <CalendarDays className="w-5 h-5" /> Open the calendar
+                <CalendarDays className="w-4 h-4" /> Open the calendar
               </button>
               <button type="button" className="mh-btn mh-btn--primary" onClick={() => openMission(store.addMission())}>
-                <PlusCircle className="w-5 h-5" /> New daily mission
+                <PlusCircle className="w-4 h-4" /> New daily mission
               </button>
             </div>
           </Card>
@@ -409,13 +410,13 @@ export default function ControlPanel({
                 setView('calendar');
               }}
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
           }
         >
           {plan.stops.length > 0 ? (
             <GoNoGoBanner evaluation={plan.evaluation}>
-              <div className="flex flex-wrap items-center gap-2 text-mh-text">
+              <div className="flex flex-wrap items-center gap-1.5 text-mh-text">
                 {mission.status === 'sent' && plan.evaluation.overall === 'violated' ? (
                   <span className="mh-pill mh-pill--crit">Sent earlier · the crew is told not to leave</span>
                 ) : mission.status === 'sent' ? (
@@ -423,7 +424,7 @@ export default function ControlPanel({
                 ) : (
                   <button
                     type="button"
-                    className="mh-btn mh-btn--primary !min-h-11"
+                    className="mh-btn mh-btn--primary !min-h-7"
                     disabled={plan.evaluation.overall === 'violated'}
                     title={plan.evaluation.overall === 'violated' ? 'A NO-GO mission cannot be approved' : 'Approve this mission and send it to the astronauts'}
                     onClick={() => {
@@ -431,7 +432,7 @@ export default function ControlPanel({
                       onToast(`Sol ${mission.sol} mission approved and sent to the astronauts`);
                     }}
                   >
-                    <Send className="w-5 h-5" /> Approve &amp; send Sol {mission.sol}
+                    <Send className="w-4 h-4" /> Approve &amp; send Sol {mission.sol}
                   </button>
                 )}
                 <SimBadge label="demo model" />
@@ -458,7 +459,7 @@ export default function ControlPanel({
             <ReplanCard title="Last replan" {...mission.replan} footer={`Applied ${mission.replan.ts}.`} />
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div>
               <Label htmlFor="m-sol">Sol</Label>
               <input
@@ -490,9 +491,9 @@ export default function ControlPanel({
           )}
 
           {/* EVA pair: can change from sol to sol */}
-          <div className="flex flex-col gap-2">
-            <span className="mh-label !text-base">EVA pair for Sol {mission.sol}</span>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="flex flex-col gap-1.5">
+            <span className="mh-label">EVA pair for Sol {mission.sol}</span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {(['EV1', 'EV2'] as const).map((seat, i) => {
                 const pair = crew.filter((c) => c.evaCrew).map((c) => c.id) as [string, string];
                 return (
@@ -532,16 +533,16 @@ export default function ControlPanel({
           </div>
 
           {/* Stops */}
-          <div className="flex flex-col gap-2">
-            <span className="mh-label !text-base">Stops (the route follows the terrain from the base)</span>
-            <ol className="m-0 p-0 list-none flex flex-col gap-2">
-              <li className="mh-tile !flex-row items-center !gap-3">
-                <span aria-hidden="true">⌂</span>
+          <div className="flex flex-col gap-1.5">
+            <span className="mh-label">Stops (the route follows the terrain from the base)</span>
+            <ol className="m-0 p-0 list-none flex flex-col gap-1.5">
+              <li className="mh-tile !flex-row items-center !gap-2">
+                <House className="w-4 h-4 shrink-0 text-mh-text2" aria-hidden="true" />
                 <span className="text-base font-semibold">Depart base · {mission.startTime}</span>
               </li>
               {plan.stops.map((poi, idx) => (
-                <li key={poi.id} className="p-3 rounded-mh-md bg-mh-fill flex items-center gap-3">
-                  <span className="w-9 h-9 shrink-0 rounded-full bg-mh-primary text-mh-on-primary font-mono flex items-center justify-center">
+                <li key={poi.id} className="p-2 rounded-mh-md bg-mh-fill flex items-center gap-2">
+                  <span className="w-6 h-6 shrink-0 rounded-[2px] bg-mh-primary text-mh-on-primary font-mono flex items-center justify-center">
                     {idx + 1}
                   </span>
                   <span className="flex-1 min-w-0 flex flex-col">
@@ -565,7 +566,7 @@ export default function ControlPanel({
                         store.updateMission(mission.id, { poiIds: ids });
                       }}
                     >
-                      <ArrowUp className="w-5 h-5" />
+                      <ArrowUp className="w-4 h-4" />
                     </button>
                     <button
                       type="button"
@@ -578,7 +579,7 @@ export default function ControlPanel({
                         store.updateMission(mission.id, { poiIds: ids });
                       }}
                     >
-                      <ArrowDown className="w-5 h-5" />
+                      <ArrowDown className="w-4 h-4" />
                     </button>
                     <button
                       type="button"
@@ -588,14 +589,14 @@ export default function ControlPanel({
                         store.updateMission(mission.id, { poiIds: mission.poiIds.filter((x) => x !== poi.id) })
                       }
                     >
-                      <X className="w-5 h-5" />
+                      <X className="w-4 h-4" />
                     </button>
                   </span>
                 </li>
               ))}
               {mission.viaShelterAfter != null && (
-                <li className="p-3 rounded-mh-md bg-mh-ok-bg text-mh-ok flex items-center gap-3">
-                  <ShieldAlert className="w-5 h-5 shrink-0" aria-hidden="true" />
+                <li className="p-2 rounded-mh-md bg-mh-ok-bg text-mh-ok flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 shrink-0" aria-hidden="true" />
                   <span className="flex-1 text-base font-semibold">
                     Via {FIELD_SHELTER_NAME} · after stop {Math.min(mission.viaShelterAfter, plan.stops.length)}
                   </span>
@@ -605,12 +606,12 @@ export default function ControlPanel({
                     aria-label="Remove the shelter detour"
                     onClick={() => store.updateMission(mission.id, { viaShelterAfter: null })}
                   >
-                    <X className="w-5 h-5" />
+                    <X className="w-4 h-4" />
                   </button>
                 </li>
               )}
-              <li className="mh-tile !flex-row items-center !gap-3">
-                <span aria-hidden="true">⌂</span>
+              <li className="mh-tile !flex-row items-center !gap-2">
+                <House className="w-4 h-4 shrink-0 text-mh-text2" aria-hidden="true" />
                 <span className="text-base font-semibold">Back at base · {plan.returnTime}</span>
               </li>
             </ol>
@@ -635,7 +636,7 @@ export default function ControlPanel({
             </select>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
             <Stat tile label="Distance" value={`${plan.totalKm.toFixed(2)} km`} />
             <Stat tile label="Walking" value={`${plan.walkMin} min`} />
             <Stat tile label="On site" value={`${plan.workMin} min`} />
@@ -648,8 +649,8 @@ export default function ControlPanel({
           </p>
 
           {/* Equipment */}
-          <div className="flex flex-col gap-2">
-            <span className="mh-label !text-base">Material to bring</span>
+          <div className="flex flex-col gap-1.5">
+            <span className="mh-label">Material to bring</span>
             <p className="m-0 text-base text-mh-text2">
               Instruments and sample kits are added automatically from the stops.
             </p>
@@ -659,7 +660,7 @@ export default function ControlPanel({
               ))}
               {plan.equipment.length === 0 && <li className="text-mh-text2">Nothing yet</li>}
             </ul>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1.5">
               {[...new Set([...STANDARD_EQUIPMENT, ...mission.extraEquipment])].map((item) => (
                 <Chip
                   key={item}
@@ -676,7 +677,7 @@ export default function ControlPanel({
                 </Chip>
               ))}
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-1.5">
               <label htmlFor="m-custom" className="sr-only">
                 Other material
               </label>
@@ -706,7 +707,7 @@ export default function ControlPanel({
               }
             }}
           >
-            <Trash2 className="w-5 h-5" /> Delete mission
+            <Trash2 className="w-4 h-4" /> Delete mission
           </button>
         </Card>
 
@@ -719,7 +720,7 @@ export default function ControlPanel({
           const evCrew = crew.filter((c) => c.evaCrew);
           return (
             <Card eyebrow={`Route analysis · Sol ${mission.sol}`} title="EVA model" aside={<SimBadge label="demo model" />}>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
                 <Stat tile label="EVA duration" value={`${m.evaDurationMin} / ${TIME_WINDOW.evaMaxMin} min`} />
                 <Stat tile label="Return buffer" value={`${m.bufferMin} min (min ${TIME_WINDOW.returnBufferMin})`} />
                 <Stat tile label="Max time to shelter" value={`${Math.round(m.maxTimeToShelterMin)} / ${A.sepMinWarningMin} min`} />
@@ -729,21 +730,21 @@ export default function ControlPanel({
               </div>
 
               {/* Timeline */}
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-1.5">
                 <span className="mh-eyebrow">
                   <Clock className="w-4 h-4" aria-hidden="true" />
                   Timeline (LST)
                 </span>
                 <svg viewBox="0 0 300 34" className="w-full h-auto" role="img" aria-label={`EVA from ${m.startLst} to ${m.endLst} LST; dust devil window ${ddStart}–${ddEnd}`}>
-                  <rect x={tx(ddStart)} y="2" width={Math.max(0, tx(ddEnd) - tx(ddStart))} height="18" fill="#E5C04A" opacity="0.25" />
-                  <rect x={tx(m.startLst)} y="8" width={Math.max(2, tx(m.endLst) - tx(m.startLst))} height="6" rx="3" fill="#2F6BD8" />
-                  <line x1={tx(TIME_WINDOW.latestReturn)} x2={tx(TIME_WINDOW.latestReturn)} y1="0" y2="22" stroke="#E5484D" strokeWidth="1.5" />
+                  <rect x={tx(ddStart)} y="2" width={Math.max(0, tx(ddEnd) - tx(ddStart))} height="18" fill="#FCE83A" opacity="0.25" />
+                  <rect x={tx(m.startLst)} y="8" width={Math.max(2, tx(m.endLst) - tx(m.startLst))} height="6" rx="3" fill="#4DACFF" />
+                  <line x1={tx(TIME_WINDOW.latestReturn)} x2={tx(TIME_WINDOW.latestReturn)} y1="0" y2="22" stroke="#FF3838" strokeWidth="1.5" />
                   {m.stops.filter((st: { kind: string }) => st.kind === 'poi').map((st: { poiId: string; etaLst: string }) => (
-                    <circle key={st.poiId} cx={tx(st.etaLst)} cy="11" r="3" fill="#ffffff" stroke="#2D7FF9" strokeWidth="1.5" />
+                    <circle key={st.poiId} cx={tx(st.etaLst)} cy="11" r="3" fill="#ffffff" stroke="#4DACFF" strokeWidth="1.5" />
                   ))}
-                  <text x={tx(m.startLst)} y="32" fontSize="8" fill="var(--mh-text2)" textAnchor="middle">{m.startLst}</text>
-                  <text x={tx(TIME_WINDOW.latestReturn)} y="32" fontSize="8" fill="#E5484D" textAnchor="middle">{TIME_WINDOW.latestReturn}</text>
-                  <text x={(tx(ddStart) + tx(ddEnd)) / 2} y="32" fontSize="8" fill="var(--mh-warn)" textAnchor="middle">dust devils</text>
+                  <text x={tx(m.startLst)} y="32" fontSize="9" fill="var(--mh-text2)" textAnchor="middle">{m.startLst}</text>
+                  <text x={tx(TIME_WINDOW.latestReturn)} y="32" fontSize="9" fill="#FF3838" textAnchor="middle">{TIME_WINDOW.latestReturn}</text>
+                  <text x={(tx(ddStart) + tx(ddEnd)) / 2} y="32" fontSize="9" fill="var(--mh-warn)" textAnchor="middle">dust devils</text>
                 </svg>
               </div>
 
@@ -765,21 +766,21 @@ export default function ControlPanel({
                     onHighlight([segs[lo].a, ...segs.slice(lo, hi + 1).map((x: { b: [number, number] }) => x.b)]);
                   }}
                 />
-                <span className="text-[13px] text-mh-text2">
+                <span className="text-[12px] text-mh-text2">
                   Red: slope &gt; {A.slopeLimitDeg}° · amber: not evaluated · click a band to show it on the map. Elevation: MOLA
                   trend; slopes: HiRISE DTM (demo values).
                 </span>
               </div>
 
               {/* Metabolic & consumables */}
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-1.5">
                 <span className="mh-eyebrow">Metabolic &amp; consumables</span>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-3 gap-1.5">
                   <Stat tile label="Energy" value={`${Math.round(m.energyKJ).toLocaleString('en-US')} kJ`} />
                   <Stat tile label="Average" value={`${Math.round(m.avgW)} W`} />
                   <Stat tile label="Peak" value={`${Math.round(m.peakW)} W`} />
                 </div>
-                <span className="flex flex-wrap justify-between gap-2 text-base">
+                <span className="flex flex-wrap justify-between gap-1.5 text-base">
                   <span>Suit consumables at EVA end</span>
                   <strong>
                     {Math.round(m.consumablesRemainingPct)}% left (reserve {A.suitReservePct}%)
@@ -789,16 +790,16 @@ export default function ControlPanel({
                   <span
                     style={{
                       width: `${m.consumablesRemainingPct}%`,
-                      background: m.consumablesRemainingPct < A.suitReservePct ? '#E5484D' : 'var(--mh-ok)'
+                      background: m.consumablesRemainingPct < A.suitReservePct ? '#FF3838' : 'var(--mh-ok)'
                     }}
                   />
                 </div>
               </div>
 
               {/* Dose */}
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-1.5">
                 <span className="mh-eyebrow">Dose for this EVA</span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                   {evCrew.map((c) => (
                     <Stat
                       key={c.id}
@@ -808,7 +809,7 @@ export default function ControlPanel({
                     />
                   ))}
                 </div>
-                <span className="text-[13px] text-mh-text2">
+                <span className="text-[12px] text-mh-text2">
                   Surface rate {A.doseRateNominalUgyH} µGy/h × EVA time × quality factor {A.qualityFactor}
                   {m.doseSepContingencyMsv > 0
                     ? ` (${m.doseNominalMsv.toFixed(2)} mSv) + SEP worst case: ${A.doseRateSepUgyH} µGy/h for the ${Math.round(m.maxTimeToShelterMin)} min needed to reach a shelter (${m.doseSepContingencyMsv.toFixed(2)} mSv).`
@@ -817,7 +818,7 @@ export default function ControlPanel({
               </div>
 
               {/* Constraints */}
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-1.5">
                 <span className="mh-eyebrow">Constraints</span>
                 <ConstraintTable evaluation={plan.evaluation} />
               </div>
@@ -835,15 +836,15 @@ export default function ControlPanel({
             title="Crew status"
             subtitle={seatMission ? `Seats for the Sol ${seatMission.sol} mission: two on EVA, two in the habitat.` : undefined}
             icon={Users}
-            aside={<span className="mh-pill mh-pill--warn">Simulated telemetry</span>}
+            aside={<SimBadge label="simulated telemetry" />}
           >
-            <ul className="m-0 p-0 list-none flex flex-col gap-3">
+            <ul className="m-0 p-0 list-none flex flex-col gap-2">
               {crew.map((c) => {
                 const fillPct = Math.min(100, (c.doseActualMsv / c.dosePlannedMsv) * 100);
                 const over = c.doseDeltaPct > 0;
                 return (
-                  <li key={c.id} className={`mh-tile !gap-3 ${c.doseDeltaMsv > 0 ? 'ring-2 ring-[#E5C04A]' : ''}`}>
-                    <div className="flex flex-wrap items-start justify-between gap-2">
+                  <li key={c.id} className={`mh-tile !gap-2 ${c.doseDeltaMsv > 0 ? 'ring-2 ring-[#FCE83A]' : ''}`}>
+                    <div className="flex flex-wrap items-start justify-between gap-1.5">
                       <span className="flex flex-col min-w-0">
                         <strong className="text-base">
                           {c.seatNow} · {c.name}
@@ -857,8 +858,8 @@ export default function ControlPanel({
                     </div>
 
                     <div className="flex flex-col gap-1">
-                      <div className="flex flex-wrap items-baseline justify-between gap-2">
-                        <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">
+                      <div className="flex flex-wrap items-baseline justify-between gap-1.5">
+                        <span className="mh-stat-label">
                           Radiation dose (surface, cumulative)
                         </span>
                         <span className={`text-base font-semibold ${over ? 'text-mh-crit' : ''}`}>
@@ -880,7 +881,7 @@ export default function ControlPanel({
                       </span>
                     </div>
 
-                    <span className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    <span className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
                       <Stat label="EVAs done" value={c.evasCompleted} />
                       <Stat label="EVAs left (dose)" value={c.remainingEvas} />
                       <Stat label="Heart rate" value={`${c.vitals.heartRate} bpm`} />
@@ -888,15 +889,15 @@ export default function ControlPanel({
                       <Stat label="Sleep" value={`${c.vitals.sleepH} h`} />
                       <Stat label="Fatigue" value={c.fatigue} />
                     </span>
-                    <span className="flex items-start gap-2 text-base text-mh-text2">
-                      <HeartPulse className="w-5 h-5 shrink-0 mt-0.5" aria-hidden="true" />
+                    <span className="flex items-start gap-1.5 text-base text-mh-text2">
+                      <HeartPulse className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
                       <span>Psych: {c.psych}</span>
                     </span>
                   </li>
                 );
               })}
             </ul>
-            <p className="m-0 text-[13px] text-mh-text2">
+            <p className="m-0 text-[12px] text-mh-text2">
               Dose budget {A.crewSurfaceDoseBudgetMsv} mSv for the surface phase. EVAs left = (budget − actual − future base dose) ÷
               per-EVA allocation (nominal EVA + {A.sepMinWarningMin} min worst-case SEP). NASA career limit {A.nasaCareerLimitMsv} mSv
               (NASA-STD-3001) shown for context only.
@@ -928,7 +929,7 @@ export default function ControlPanel({
               const overlapMin = Math.max(0, Math.min(lstToMin(m.endLst), lstToMin(ddEnd)) - Math.max(lstToMin(m.startLst), lstToMin(ddStart)));
               const tau = state.sepAlert ? A.tauSep : A.tauNominal;
               return (
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-1.5">
                   <Stat tile label={`Sun at start (${m.startLst})`} value={`${sunElevationDeg(m.startLst).toFixed(0)}° elevation`} />
                   <Stat tile label={`Sun at return (${m.endLst})`} value={`${sunElevationDeg(m.endLst).toFixed(0)}° elevation`} />
                   <Stat tile label="Dust opacity τ" value={`${tau.toFixed(2)} (limit ${A.tauVisibilityDegraded})`} />
@@ -941,9 +942,9 @@ export default function ControlPanel({
               role={state.sepAlert ? 'alert' : undefined}
             >
               {state.sepAlert ? (
-                <AlertTriangle className="w-5 h-5 shrink-0" aria-hidden="true" />
+                <AlertTriangle className="w-4 h-4 shrink-0" aria-hidden="true" />
               ) : (
-                <CheckCircle2 className="w-5 h-5 shrink-0" aria-hidden="true" />
+                <CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" />
               )}
               <p className="m-0 flex-1">
                 <strong>SEP / DONKI:</strong>{' '}
@@ -952,8 +953,8 @@ export default function ControlPanel({
                   : `nominal — ${A.doseRateNominalUgyH} µGy/h at the surface`}
               </p>
             </div>
-            <div className="flex flex-col gap-2">
-              <span className="mh-label !text-base">Scripted SEP event (demo)</span>
+            <div className="flex flex-col gap-1.5">
+              <span className="mh-label">Scripted SEP event (demo)</span>
               <Segmented
                 label="SEP alert"
                 value={state.sepAlert ? 'on' : 'off'}
@@ -968,11 +969,11 @@ export default function ControlPanel({
               />
             </div>
             <p className="m-0 text-base">PDS M20 MEDA Sol 455: −24 °C · pressure 742 Pa · wind 5.8 m/s SE · dust τ = 0.45</p>
-            <div className="flex flex-wrap gap-2">
-              <span className="mh-pill mh-pill--info !text-[13px]">MEDA historical (Sol 455)</span>
-              <span className="mh-pill mh-pill--info !text-[13px]">DONKI scripted</span>
+            <div className="flex flex-wrap gap-1.5">
+              <span className="mh-tag">MEDA historical (Sol 455)</span>
+              <span className="mh-tag">DONKI scripted</span>
             </div>
-            <p className="m-0 text-[13px] text-mh-text2">
+            <p className="m-0 text-[12px] text-mh-text2">
               Sun: sin e = sin φ sin δ + cos φ cos δ cos h, φ = {A.latitudeDeg}°, δ = {A.solarDeclinationDeg}° (demo season, Ls ≈ 30°).
             </p>
           </Card>

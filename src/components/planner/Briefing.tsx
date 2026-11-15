@@ -132,7 +132,7 @@ export default function EvaBriefing({
   );
 
   return (
-    <div className="mh-print-overlay fixed inset-0 z-[1200] bg-black/60 flex items-center justify-center p-3 sm:p-6" onClick={onClose}>
+    <div className="mh-print-overlay fixed inset-0 z-[1200] bg-black/60 flex items-center justify-center p-2 sm:p-3" onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"
@@ -141,13 +141,13 @@ export default function EvaBriefing({
         className="mh-print-root mh-window bg-mh-card w-full max-w-[1100px] h-[94vh] flex flex-col overflow-hidden select-text"
       >
         {/* ── Header ─────────────────────────────────────────────────────── */}
-        <div className="px-5 py-3 flex flex-wrap items-start justify-between gap-3 border-b border-mh-sep shrink-0">
+        <div className="px-3 py-2 flex flex-wrap items-start justify-between gap-2 border-b border-mh-sep shrink-0">
           <div className="flex flex-col gap-1.5 min-w-0">
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2">
               <span className={`mh-verdict ${noGo ? 'mh-verdict--nogo' : pending ? 'mh-verdict--hold' : 'mh-verdict--go'}`}>
                 {noGo ? 'NO-GO' : pending ? 'HOLD' : 'GO'}
               </span>
-              <h2 id="briefing-title" className="m-0 text-[22px] leading-tight font-bold">
+              <h2 id="briefing-title" className="m-0 text-[15px] leading-tight font-bold">
                 EVA Briefing · Sol {mission.sol}
                 {mission.sol === state.todaySol ? ' (today)' : ''}
               </h2>
@@ -158,19 +158,19 @@ export default function EvaBriefing({
               {noGo ? ' · do not leave the base' : pending ? ' · wait for the approved version' : ''}
             </p>
           </div>
-          <div className="flex items-center gap-2 mh-no-print">
+          <div className="flex items-center gap-1.5 mh-no-print">
             <button type="button" onClick={() => window.print()} className="mh-btn mh-btn--tinted">
               <Printer className="w-4 h-4" /> Print
             </button>
             <button type="button" onClick={onClose} className="mh-btn mh-btn--icon bg-mh-fill text-mh-text shrink-0" aria-label="Close briefing">
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        <div className="mh-print-scroll flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-5">
+        <div className="mh-print-scroll flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-3">
           {/* Crew + what changed */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
             <section aria-label="Crew">
               <H>Crew</H>
               <dl className="mh-kv-list">
@@ -300,7 +300,7 @@ export default function EvaBriefing({
             </div>
           </section>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
             {/* Hazards along route */}
             <section aria-label="Hazards along route" className="break-inside-avoid">
               <H>Hazards along route</H>
@@ -392,7 +392,7 @@ export default function EvaBriefing({
               <H>Pre-EVA equipment checklist</H>
               <ul className="m-0 p-0 list-none flex flex-col gap-1 text-base">
                 {checklist.map((item) => (
-                  <li key={item} className="flex items-start gap-2">
+                  <li key={item} className="flex items-start gap-1.5">
                     <span className={`mh-checkbox ${packed.includes(item) ? 'is-on' : ''}`} aria-hidden="true" />
                     <span>
                       {item}

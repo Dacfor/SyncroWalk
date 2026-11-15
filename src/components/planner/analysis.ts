@@ -369,9 +369,9 @@ export const evaluateConstraints = (m, ctx = {}) => {
 };
 
 export const CONSTRAINT_STATUS = {
-  ok: { label: 'OK', cls: 'mh-pill--ok', color: '#35B17A' },
-  watch: { label: 'Watch', cls: 'mh-pill--warn', color: '#E5C04A' },
-  violated: { label: 'Violated', cls: 'mh-pill--crit', color: '#E5484D' }
+  ok: { label: 'OK', cls: 'mh-pill--ok', color: '#56F000' },
+  watch: { label: 'Watch', cls: 'mh-pill--caution', color: '#FCE83A' },
+  violated: { label: 'Violated', cls: 'mh-pill--crit', color: '#FF3838' }
 };
 
 // Constraint value / margin formatting (table, GO/NO-GO banner, mission reasons)
@@ -457,8 +457,8 @@ export const residualLevel = (nSigma) =>
   Math.abs(nSigma) < 1
     ? { label: 'Confirms prior', color: '#8E8E93', strength: 0 }
     : Math.abs(nSigma) < 2
-      ? { label: 'Partly contradicts prior', color: '#E5C04A', strength: 1 }
-      : { label: 'Contradicts prior', color: '#FF6B35', strength: 2 };
+      ? { label: 'Partly contradicts prior', color: '#FCE83A', strength: 1 }
+      : { label: 'Contradicts prior', color: '#FFB302', strength: 2 };
 
 // Hypothesis status from the POIs that test it (demo rule)
 export const hypothesisStatus = (h, pois) => {
@@ -472,7 +472,7 @@ export const hypothesisStatus = (h, pois) => {
 };
 export const HYPOTHESIS_STATUS = {
   supported: { label: 'Supported', cls: 'mh-pill--ok' },
-  weakened: { label: 'Weakened', cls: 'mh-pill--crit' },
+  weakened: { label: 'Weakened', cls: 'mh-pill--warn' },
   open: { label: 'Open', cls: 'mh-pill--info' }
 };
 
