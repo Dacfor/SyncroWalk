@@ -54,6 +54,7 @@ import {
   MISSION_OBJECTIVE,
   PRIOR_ZONES,
   SHELTERS,
+  SLOPE_FEATURES,
   TIME_WINDOW,
   addMinutesToLst,
   distKm,
@@ -1286,28 +1287,18 @@ export default function MissionPlanner() {
           fillColor: '#E5C04A',
           fillOpacity: 0.18
         })
-          .bindTooltip(`⚠ NOT EVALUATED [${nez.id}]: ${nez.name} — ${nez.limit}`, {
+          .bindTooltip(`NOT EVALUATED [${nez.id}]: ${nez.name} — ${nez.limit}`, {
             sticky: true
           })
           .addTo(hazardGroup);
       });
 
-      // Steep >15° Delta Scarp Red Segment below Skinner Ridge
-      L.polyline(
-        [
-          [18.4468, 77.4542],
-          [18.4518, 77.4595]
-        ],
-        {
-          color: '#E5484D',
-          weight: 7,
-          opacity: 0.85
-        }
-      )
-        .bindTooltip('[ALERT] 19.4° Steep Delta Scarp [HiRISE DTM 1m/px — Demo Threshold 15°]', {
-          sticky: true
-        })
-        .addTo(hazardGroup);
+      // Slopes above the limit (same features the EVA model uses)
+      SLOPE_FEATURES.filter((f) => f.slopeDeg > DEMO_ASSUMPTIONS.slopeLimitDeg).forEach((f) => {
+        L.polyline(f.coords, { color: '#E5484D', weight: 7, opacity: 0.85 })
+          .bindTooltip(`${f.slopeDeg}° · ${f.name} [HiRISE DTM 1 m/px, demo value · limit ${DEMO_ASSUMPTIONS.slopeLimitDeg}°]`, { sticky: true })
+          .addTo(hazardGroup);
+      });
     }
 
     // 3b. Analysis overlays: uncertainty (σ), reachable area, residual halos, 40-min shelter rings
@@ -1438,6 +1429,14 @@ export default function MissionPlanner() {
           `Sol ${mapMission.sol} EVA · ${mapPlan.totalKm.toFixed(2)} km along the terrain · back at base ${mapPlan.returnTime}`,
           { sticky: true }
         )
+        .addTo(routeGroup);
+    }
+
+    // Route diverted via the field shelter (replan): always mark it, whatever the layer toggles
+    if (mapPlan?.metrics.viaShelter) {
+      const sh = SHELTERS.find((x) => x.id === 'ALCOVE');
+      L.circleMarker([sh.lat, sh.lon], { radius: 8, color: '#ffffff', weight: 2.5, fillColor: '#35B17A', fillOpacity: 1 })
+        .bindTooltip(`${sh.name} · SEP shelter on the route`, { permanent: true, direction: 'left', className: 'syncrowalk-tooltip' })
         .addTo(routeGroup);
     }
 
@@ -2276,6 +2275,7 @@ export default function MissionPlanner() {
                               {poi && <span className="text-base text-mh-text2">{st.stationMin} min on site · leave {st.departLst}</span>}
                               {st.kind === 'start' && <span className="text-base text-mh-text2">Egress · leave {st.departLst}</span>}
                               {st.kind === 'base' && <span className="text-base text-mh-text2">Ingress · EVA ends {m.endLst}</span>}
+                              {st.kind === 'shelter' && <span className="text-base text-mh-text2">Pass by the shelter · no stop planned</span>}
                             </div>
                             {poi && (
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

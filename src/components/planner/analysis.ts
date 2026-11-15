@@ -25,6 +25,11 @@ export const DEMO_ASSUMPTIONS = {
   surfacePhaseSols: 45,
   evaDoseLimitMsv: 2, // demo per-EVA dose limit
   sepMinWarningMin: 40, // minimum warning before ~100 MeV protons arrive → max time to shelter
+  // Pre-authorised rule while an SEP alert is active (demo): only a shortened EVA that stays close
+  // to a shelter and whose route passes by a field shelter may go
+  sepEvaMaxMin: 150,
+  sepShelterMaxMin: 25,
+  minStationMin: 15, // shortest useful time on site when a replan trims a non-priority stop
   // ── Mobility (reduced suit mobility) ───────────────────────────────────────
   walkSpeedKmhFlat: 2.5,
   slopeSpeedLossPerDeg: 0.035, // speed × (1 − 0.035 × slope°), never below 30 %
@@ -60,7 +65,8 @@ export const TIME_WINDOW = { evaMaxMin: 300, returnBufferMin: 45, latestReturn: 
 
 // Local slopes (HiRISE DTM 1 m/px — demo values). MOLA alone (~460 m/px) cannot see them.
 export const SLOPE_FEATURES = [
-  { id: 'SCARP', name: 'Delta scarp below Skinner Ridge', slopeDeg: 19.4, radiusKm: 0.06, coords: [[18.4468, 77.4542], [18.4518, 77.4595]] },
+  // Starts 120 m east of the base (it used to start within 60 m of it, so every route was NO-GO)
+  { id: 'SCARP', name: 'Delta scarp below Skinner Ridge', slopeDeg: 19.4, radiusKm: 0.06, coords: [[18.4497, 77.4575], [18.4518, 77.4595]] },
   { id: 'WILDCAT', name: 'Wildcat Ridge climb', slopeDeg: 13.5, radiusKm: 0.07, coords: [[18.4438, 77.4516], [18.4452, 77.4512]] },
   { id: 'NUKSHAK', name: 'Cape Nukshak bench', slopeDeg: 14.2, radiusKm: 0.03, coords: [[18.4398, 77.4484], [18.4408, 77.4485]] }
 ];
@@ -182,6 +188,7 @@ export const computeMissionMetrics = (waypoints, legs, stopPois, startLst, ctx =
   let maxSlopeName = 'MOLA gradient';
   let maxShelterMin = 0;
   let gainM = 0;
+  let lossM = 0;
   const raw = [];
   const legStats = [];
   const stops = [{ kind: 'start', name: BASE.name, lat: wps[0][0], lon: wps[0][1], etaMin: 0, departMin: t, distKm: 0 }];
@@ -217,6 +224,7 @@ export const computeMissionMetrics = (waypoints, legs, stopPois, startLst, ctx =
       energyKJ += (watts * segMin * 60) / 1000;
       peakW = Math.max(peakW, watts);
       if (elev > prevElev) gainM += elev - prevElev;
+      else lossM += prevElev - elev;
       prevElev = elev;
       distanceKm += d;
       walkMin += segMin;
@@ -229,7 +237,10 @@ export const computeMissionMetrics = (waypoints, legs, stopPois, startLst, ctx =
     legStats.push({ km: distanceKm - legStartKm, startMin: legStart, endMin: t });
 
     const poi = stopPois[li];
-    if (poi) {
+    if (poi?.isShelter) {
+      // Route diverted via a field shelter (replan): a waypoint with no time on site
+      stops.push({ kind: 'shelter', name: poi.name, lat: wps[li + 1][0], lon: wps[li + 1][1], etaMin: t, distKm: distanceKm, departMin: t });
+    } else if (poi) {
       const st = poi.durationMin ?? A.funnelMinPerPoi;
       stops.push({ kind: 'poi', poiId: poi.id, name: `${poi.id} · ${poi.name.split('(')[0].trim()}`, lat: wps[li + 1][0], lon: wps[li + 1][1], etaMin: t, stationMin: st, distKm: distanceKm, departMin: t + st });
       stationMin += st;
@@ -247,7 +258,11 @@ export const computeMissionMetrics = (waypoints, legs, stopPois, startLst, ctx =
   const energyWh = energyKJ / 3.6;
   const consumablesUsedPct = (energyWh / A.suitConsumablesWh) * 100;
   const toMsv = (ugyPerH, minutes) => (ugyPerH * (minutes / 60) * A.qualityFactor) / 1000;
-  const doseEvaMsv = toMsv(sepAlert ? A.doseRateSepUgyH : A.doseRateNominalUgyH, evaDurationMin);
+  // Nominal surface rate for the whole EVA. With an SEP alert: plus the worst case, the SEP rate
+  // for as long as it takes to reach a shelter from the farthest point of the route.
+  const doseNominalMsv = toMsv(A.doseRateNominalUgyH, evaDurationMin);
+  const doseSepContingencyMsv = sepAlert ? toMsv(A.doseRateSepUgyH, maxShelterMin) : 0;
+  const doseEvaMsv = doseNominalMsv + doseSepContingencyMsv;
 
   // ~40 samples for the elevation profile + contiguous segments (steep / not evaluated)
   const n = 40;
@@ -276,13 +291,17 @@ export const computeMissionMetrics = (waypoints, legs, stopPois, startLst, ctx =
     neKm,
     nePct: distanceKm ? (neKm / distanceKm) * 100 : 0,
     maxTimeToShelterMin: maxShelterMin,
+    viaShelter: stopPois.some((p) => p?.isShelter),
     gainM,
+    lossM,
     energyKJ,
     energyWh,
     avgW: evaDurationMin ? (energyKJ * 1000) / (evaDurationMin * 60) : 0,
     peakW,
     consumablesRemainingPct: Math.max(0, 100 - consumablesUsedPct),
     doseEvaMsv,
+    doseNominalMsv,
+    doseSepContingencyMsv,
     samples,
     segments
   };
@@ -314,8 +333,16 @@ export const evaluateConstraints = (m, ctx = {}) => {
   add('notEvaluated', 'Not-evaluated terrain', m.nePct, A.notEvaluatedMaxPct, 'max', '%', 100, (v) => v.toFixed(1));
   add('dose', 'EVA dose', m.doseEvaMsv, A.evaDoseLimitMsv, 'max', 'mSv', A.evaDoseLimitMsv, (v) => v.toFixed(2));
   if (ctx.sepAlert) {
-    rows.push({ id: 'sep', name: 'SEP alert: stay in shelter', value: 1, limit: 0, dir: 'max', unit: '', margin: -1, rel: -1, status: 'violated', fmt: () => 'active' });
+    // Pre-authorised SEP rule: shortened EVA, close to a shelter, route via a field shelter
+    add('sepDuration', 'SEP rule: shortened EVA', m.evaDurationMin, A.sepEvaMaxMin, 'max', 'min');
+    add('sepShelter', 'SEP rule: time to shelter', m.maxTimeToShelterMin, A.sepShelterMaxMin, 'max', 'min');
+    add('sepVia', 'SEP rule: route via a field shelter', m.viaShelter ? 1 : 0, 1, 'min', '', 1, (v) => (v ? 'yes' : 'no'));
+    Object.assign(rows[rows.length - 1], m.viaShelter ? { status: 'ok', rel: 1 } : { status: 'violated', rel: -1 }); // yes / no, never "watch"
   }
+  // EVA pair: each astronaut must still have dose budget for one more EVA
+  (ctx.pair ?? []).forEach((c) => {
+    add(`crewDose-${c.id}`, `Dose reserve · ${c.name}`, remainingEvasByDose(c.doseActualMsv, ctx.sol ?? 0), 1, 'min', 'EVA', 4);
+  });
   const determinant = rows.reduce((d, r) => (r.rel < d.rel ? r : d), rows[0]);
   determinant.determinant = true;
   const overall = rows.some((r) => r.status === 'violated') ? 'violated' : rows.some((r) => r.status === 'watch') ? 'watch' : 'ok';
@@ -332,7 +359,7 @@ export const CONSTRAINT_STATUS = {
 const unitSuffix = (u) => (!u || u === 'LST' ? '' : u === '°' || u === '%' ? u : ` ${u}`);
 export const constraintValue = (r, v) => `${r.fmt(v)}${unitSuffix(r.unit)}`;
 export const constraintMargin = (r) => {
-  if (r.id === 'sep') return 'active';
+  if (r.id === 'sepVia') return r.margin < 0 ? 'missing' : 'ok';
   const mag = Math.abs(r.margin);
   const txt = r.id === 'slope' || r.id === 'notEvaluated' ? mag.toFixed(1) : r.id === 'dose' ? mag.toFixed(2) : Math.round(mag);
   return `${r.margin >= 0 ? '+' : '−'}${txt}${r.unit === 'LST' ? ' min' : unitSuffix(r.unit)}`;
@@ -355,14 +382,21 @@ const constraintShort = (r, m) => {
       return `${r.value.toFixed(0)}% not evaluated`;
     case 'dose':
       return `EVA dose ${r.value.toFixed(2)} mSv`;
+    case 'sepDuration':
+      return `SEP rule: EVA ${r.value} min > ${r.limit} min`;
+    case 'sepShelter':
+      return `SEP rule: ${Math.round(r.value)} min to shelter > ${r.limit}`;
+    case 'sepVia':
+      return 'SEP rule: route not via a shelter';
     default:
-      return r.name;
+      return r.id.startsWith('crewDose') ? `${r.name.replace('Dose reserve · ', '')} has no dose budget for an EVA` : r.name;
   }
 };
 // One-line verdict, e.g. "NO-GO: buffer −10 min (min 45) · 19.4° delta scarp"
 export const missionReason = (ev, m) => {
-  const rank = ['sep', 'buffer', 'slope', 'dose', 'shelter', 'consumables', 'duration', 'latest', 'notEvaluated'];
-  const bad = ev.rows.filter((r) => r.status === 'violated').sort((a, b) => rank.indexOf(a.id) - rank.indexOf(b.id));
+  const rank = ['sepDuration', 'sepShelter', 'sepVia', 'crewDose', 'buffer', 'slope', 'dose', 'shelter', 'consumables', 'duration', 'latest', 'notEvaluated'];
+  const rk = (r) => rank.indexOf(r.id.startsWith('crewDose') ? 'crewDose' : r.id);
+  const bad = ev.rows.filter((r) => r.status === 'violated').sort((a, b) => rk(a) - rk(b));
   if (bad.length) return `NO-GO: ${bad.slice(0, 2).map((r) => constraintShort(r, m)).join(' · ')}`;
   const watch = ev.rows.filter((r) => r.status === 'watch');
   if (watch.length) return `Watch: ${watch.map((r) => constraintShort(r, m)).join(' · ')}`;
@@ -421,6 +455,17 @@ export const HYPOTHESIS_STATUS = {
   supported: { label: 'Supported', cls: 'mh-pill--ok' },
   weakened: { label: 'Weakened', cls: 'mh-pill--crit' },
   open: { label: 'Open', cls: 'mh-pill--info' }
+};
+
+// ── Clocks ──────────────────────────────────────────────────────────────────
+// Mars local mean solar time at a longitude (Allison & McEwen 2000, as in NASA Mars24):
+// MSD = (JD_TT − 2405522.0028779) / 1.0274912517, MTC = 24 h × frac(MSD), LMST = MTC + lon/15.
+export const marsLmst = (date = new Date(), lonEastDeg = 77.45) => {
+  const jdTt = date.getTime() / 86400000 + 2440587.5 + 69.184 / 86400;
+  const msd = (jdTt - 2405522.0028779) / 1.0274912517;
+  const hours = ((((msd % 1) * 24 + lonEastDeg / 15) % 24) + 24) % 24;
+  const totalMin = Math.floor(hours * 60);
+  return `${String(Math.floor(totalMin / 60)).padStart(2, '0')}:${String(totalMin % 60).padStart(2, '0')}`;
 };
 
 // ── Environment ─────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 import { AlertTriangle, Backpack, CalendarDays, CheckCircle2, Clock, FileText, MapPin } from 'lucide-react';
 import { Card, PanelTabs, Stat, TabPanel } from './ui.tsx';
-import { PRIORITY_META, TODAY_SOL, instrumentName, planFor } from './model.ts';
+import { PRIORITY_META, TODAY_SOL, instrumentName, missionVersion, planFor } from './model.ts';
 import { DEMO_ASSUMPTIONS as A, TIME_WINDOW, addMinutesToLst, bearingDeg, compassPoint, distKm, lstToMin } from './analysis.ts';
 import { SimBadge } from './analysisUi.tsx';
 import type { Poi } from './model.ts';
@@ -154,19 +154,23 @@ export default function AstronautPanel({
             <>
               {view === 'schedule' && hud && (
                 <section
-                  className={`p-5 sm:p-6 rounded-mh-lg shadow-mh flex flex-col gap-4 ${state.sepAlert ? 'bg-mh-crit-bg' : 'bg-mh-card'}`}
+                  className={`p-5 sm:p-6 rounded-mh-lg shadow-mh flex flex-col gap-4 ${plan.evaluation.overall === 'violated' ? 'bg-mh-crit-bg' : 'bg-mh-card'}`}
                   aria-live="polite"
                 >
                   <div className="flex flex-wrap items-center gap-2">
-                    {state.sepAlert ? (
-                      <span className="mh-pill mh-pill--crit">SEP alert: go to the nearest shelter now</span>
-                    ) : plan.evaluation.overall === 'violated' ? (
-                      <span className="mh-pill mh-pill--crit">Not cleared · NO-GO</span>
+                    {plan.evaluation.overall === 'violated' ? (
+                      <span className="mh-pill mh-pill--crit">
+                        {state.sepAlert && isToday ? 'SEP alert · NO-GO: stay in the base' : 'Not cleared · NO-GO: stay in the base'}
+                      </span>
+                    ) : mission.status === 'changed' ? (
+                      <span className="mh-pill mh-pill--warn">New plan waiting for approval · do not leave</span>
+                    ) : state.sepAlert && isToday ? (
+                      <span className="mh-pill mh-pill--warn">SEP alert · shortened EVA via shelter · GO</span>
                     ) : (
                       <span className="mh-pill mh-pill--ok">On plan · GO</span>
                     )}
                     <span className="text-base font-semibold">
-                      Sol {mission.sol} · out {hud.m.startLst} → back in base {hud.m.endLst}
+                      Sol {mission.sol} · plan v{missionVersion(mission)} · out {hud.m.startLst} → back in base {hud.m.endLst}
                     </span>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
@@ -236,6 +240,8 @@ export default function AstronautPanel({
                             ? 'Ingress: back inside the base'
                             : item.kind === 'travel'
                               ? `Walk to ${item.to} · ${item.km.toFixed(2)} km`
+                              : item.kind === 'shelter'
+                                ? `Pass by ${item.name}`
                               : `${item.poi.id} · ${item.poi.name}${state.measured.includes(item.poi.id) ? ' · measured' : ''}`;
                       const strong = item.kind !== 'travel';
                       return (

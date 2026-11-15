@@ -173,7 +173,7 @@ export function ConstraintTable({ evaluation }: any) {
                 </td>
                 <td className="!py-2 whitespace-nowrap">{constraintValue(r, r.value)}</td>
                 <td className="!py-2 whitespace-nowrap text-mh-text2">
-                  {r.id === 'sep' ? '—' : `${r.dir === 'max' ? '≤' : '≥'} ${constraintValue(r, r.limit)}`}
+                  {r.id === 'sepVia' ? 'required' : `${r.dir === 'max' ? '≤' : '≥'} ${constraintValue(r, r.limit)}`}
                 </td>
                 <td className="!py-2 whitespace-nowrap">
                   <span className={`mh-pill ${st.cls} !text-[13px]`}>{constraintMargin(r)}</span>
@@ -208,7 +208,7 @@ export function GoNoGoBanner({ evaluation, title = '', children = null }: any) {
       </div>
       <p className="m-0 text-base text-mh-text">
         Binding constraint: <strong>{det.name}</strong> — {constraintValue(det, det.value)}
-        {det.id !== 'sep' && (
+        {det.id !== 'sepVia' && (
           <>
             {' '}
             vs {det.dir === 'max' ? '≤' : '≥'} {constraintValue(det, det.limit)} · margin <strong>{constraintMargin(det)}</strong>

@@ -14,8 +14,10 @@ import {
   Send,
   Trash2,
   Users,
+  ShieldAlert,
   X
 } from 'lucide-react';
+import { ReplanCard } from './Replan.tsx';
 import {
   CONSTRAINT_STATUS,
   DEMO_ASSUMPTIONS as A,
@@ -35,7 +37,10 @@ import {
   PRIORITY_META,
   STANDARD_EQUIPMENT,
   TODAY_SOL,
-  planFor
+  FIELD_SHELTER_NAME,
+  missionVersion,
+  planFor,
+  suggestReplan
 } from './model.ts';
 import type { Poi, Priority } from './model.ts';
 import type { PlannerStore } from './usePlannerStore.ts';
@@ -123,6 +128,13 @@ export default function ControlPanel({
     setSelectedMissionId(id);
     setView('route');
   };
+  // NO-GO → suggested replan for the mission being edited
+  const replan = mission && plan && plan.evaluation.overall === 'violated' ? suggestReplan(state, mission) : null;
+  // Missions that are NO-GO right now (a sent plan can turn NO-GO, e.g. after an SEP alert)
+  const noGoMissions = missions
+    .filter((m) => m.poiIds.length > 0)
+    .map((m) => ({ m, p: planFor(state, m) }))
+    .filter(({ p }) => p.evaluation.overall === 'violated');
 
   return (
     <>
@@ -138,6 +150,25 @@ export default function ControlPanel({
           { id: 'environment', label: 'Environment', icon: Radio, badge: state.sepAlert ? '!' : undefined }
         ]}
       />
+
+      {/* NO-GO alert, visible from every tab: the binding constraint and the way to the replan */}
+      {noGoMissions
+        .filter(({ m }) => !(view === 'route' && m.id === selectedMissionId))
+        .map(({ m, p }) => (
+          <div key={m.id} className="mh-nogo" role="alert">
+            <ShieldAlert className="w-6 h-6 shrink-0" aria-hidden="true" />
+            <div className="flex-1 min-w-0 flex flex-col">
+              <strong className="text-[17px]">
+                NO-GO · Sol {m.sol} plan v{missionVersion(m)}
+                {m.status === 'sent' ? ' (already sent: the crew is told not to leave)' : ''}
+              </strong>
+              <span className="text-base">{missionReason(p.evaluation, p.metrics).replace(/^NO-GO: /, '')}</span>
+            </div>
+            <button type="button" className="mh-btn" onClick={() => openMission(m.id)}>
+              Review replan
+            </button>
+          </div>
+        ))}
 
       {/* ── 1. Points of interest from the scientist ─────────────────────── */}
       {view === 'pois' && (
@@ -284,7 +315,7 @@ export default function ControlPanel({
                   <span className="flex flex-wrap items-center justify-between gap-2">
                     <strong className="text-base">
                       Sol {m.sol}
-                      {m.sol === TODAY_SOL ? ' · Today' : ''}
+                      {m.sol === TODAY_SOL ? ' · Today' : ''} · plan v{missionVersion(m)}
                     </strong>
                     <span className="flex flex-wrap gap-2">
                       {p.stops.length > 0 && (
@@ -362,7 +393,7 @@ export default function ControlPanel({
       {view === 'route' && mission && plan && (
         <TabPanel id="route">
         <Card
-          eyebrow={`Mission plan · ${STATUS_META[mission.status].label}`}
+          eyebrow={`Mission plan v${missionVersion(mission)} · ${STATUS_META[mission.status].label}`}
           title={`Sol ${mission.sol} route`}
           icon={Route}
           highlight
@@ -383,7 +414,9 @@ export default function ControlPanel({
           {plan.stops.length > 0 ? (
             <GoNoGoBanner evaluation={plan.evaluation}>
               <div className="flex flex-wrap items-center gap-2 text-mh-text">
-                {mission.status === 'sent' ? (
+                {mission.status === 'sent' && plan.evaluation.overall === 'violated' ? (
+                  <span className="mh-pill mh-pill--crit">Sent earlier · the crew is told not to leave</span>
+                ) : mission.status === 'sent' ? (
                   <span className="mh-pill mh-pill--ok">Sent to the astronauts</span>
                 ) : (
                   <button
@@ -404,6 +437,23 @@ export default function ControlPanel({
             </GoNoGoBanner>
           ) : (
             <p className="m-0 text-base text-mh-text2">Add at least one stop to get a GO / NO-GO.</p>
+          )}
+
+          {replan && (
+            <ReplanCard
+              title="Suggested replan"
+              {...replan}
+              onApply={() => {
+                store.applyReplan(mission.id, replan);
+                onToast(
+                  `Replan applied: Sol ${replan.after.sol} plan v${replan.toVersion} (${replan.after.overall === 'violated' ? 'still NO-GO' : 'GO'}). Approve it to send it to the crew.`
+                );
+              }}
+              footer="A NO-GO plan cannot be sent to the astronauts."
+            />
+          )}
+          {!replan && mission.replan && mission.replan.toVersion === missionVersion(mission) && (
+            <ReplanCard title="Last replan" {...mission.replan} footer={`Applied ${mission.replan.ts}.`} />
           )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -498,6 +548,7 @@ export default function ControlPanel({
                     </strong>
                     <span className="text-base text-mh-text2">
                       {poi.priority ? PRIORITY_META[poi.priority].label : 'No'} priority · {poi.durationMin} min
+                      {mission.durationOverrides?.[poi.id] != null ? ' (shortened by the replan)' : ''}
                     </span>
                   </span>
                   <span className="flex gap-1 shrink-0">
@@ -540,6 +591,22 @@ export default function ControlPanel({
                   </span>
                 </li>
               ))}
+              {mission.viaShelterAfter != null && (
+                <li className="p-3 rounded-mh-md bg-mh-ok-bg text-mh-ok flex items-center gap-3">
+                  <ShieldAlert className="w-5 h-5 shrink-0" aria-hidden="true" />
+                  <span className="flex-1 text-base font-semibold">
+                    Via {FIELD_SHELTER_NAME} · after stop {Math.min(mission.viaShelterAfter, plan.stops.length)}
+                  </span>
+                  <button
+                    type="button"
+                    className="mh-btn mh-btn--icon bg-mh-card text-mh-text"
+                    aria-label="Remove the shelter detour"
+                    onClick={() => store.updateMission(mission.id, { viaShelterAfter: null })}
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </li>
+              )}
               <li className="mh-tile !flex-row items-center !gap-3">
                 <span aria-hidden="true">⌂</span>
                 <span className="text-base font-semibold">Back at base · {plan.returnTime}</span>
@@ -740,9 +807,10 @@ export default function ControlPanel({
                   ))}
                 </div>
                 <span className="text-[13px] text-mh-text2">
-                  {state.sepAlert
-                    ? `SEP rate ${A.doseRateSepUgyH} µGy/h for the whole EVA.`
-                    : `Surface rate ${A.doseRateNominalUgyH} µGy/h × EVA time × quality factor ${A.qualityFactor}.`}
+                  Surface rate {A.doseRateNominalUgyH} µGy/h × EVA time × quality factor {A.qualityFactor}
+                  {m.doseSepContingencyMsv > 0
+                    ? ` (${m.doseNominalMsv.toFixed(2)} mSv) + SEP worst case: ${A.doseRateSepUgyH} µGy/h for the ${Math.round(m.maxTimeToShelterMin)} min needed to reach a shelter (${m.doseSepContingencyMsv.toFixed(2)} mSv).`
+                    : '.'}
                 </span>
               </div>
 
@@ -871,7 +939,7 @@ export default function ControlPanel({
               <p className="m-0 flex-1">
                 <strong>SEP / DONKI:</strong>{' '}
                 {state.sepAlert
-                  ? `alert — proton flux > 35 pfu, ${A.doseRateSepUgyH} µGy/h at the surface. Every EVA is NO-GO.`
+                  ? `alert — proton flux > 35 pfu expected, up to ${A.doseRateSepUgyH} µGy/h at the surface. Today only a shortened EVA may go: ≤ ${A.sepEvaMaxMin} min, ≤ ${A.sepShelterMaxMin} min from a shelter, route via a field shelter.`
                   : `nominal — ${A.doseRateNominalUgyH} µGy/h at the surface`}
               </p>
             </div>
@@ -882,7 +950,7 @@ export default function ControlPanel({
                 value={state.sepAlert ? 'on' : 'off'}
                 onChange={(v) => {
                   store.setSepAlert(v === 'on');
-                  onToast(v === 'on' ? 'SEP alert raised: astronauts are told to go to shelter' : 'SEP alert cleared');
+                  onToast(v === 'on' ? 'SEP alert raised: today’s plan is re-evaluated under the SEP rule' : 'SEP alert cleared');
                 }}
                 options={[
                   { value: 'off', label: 'Nominal' },

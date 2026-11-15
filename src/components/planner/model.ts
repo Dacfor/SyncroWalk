@@ -1,4 +1,13 @@
-import { BASE, DEMO_ASSUMPTIONS, TIME_WINDOW, computeMissionMetrics, evaluateConstraints } from './analysis.ts';
+import {
+  BASE,
+  DEMO_ASSUMPTIONS,
+  SHELTERS,
+  TIME_WINDOW,
+  computeMissionMetrics,
+  evaluateConstraints,
+  missionReason,
+  remainingEvasByDose
+} from './analysis.ts';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SHARED MISSION-PLANNING MODEL
@@ -48,6 +57,29 @@ export interface DailyMission {
   status: MissionStatus;
   /** Crew ids of the two astronauts going out [EV1, EV2]; default = the roster seats */
   evaPair?: [string, string];
+  /** Plan version (v1, v2, …): a replan creates a new version */
+  version?: number;
+  approvedBy?: string;
+  /** Replan only: time on site for this mission, when shorter than the POI default */
+  durationOverrides?: Record<string, number>;
+  /** Replan only: the route passes by the field shelter after this many stops */
+  viaShelterAfter?: number | null;
+  /** The last replan applied to this mission (before / after comparison) */
+  replan?: ReplanRecord;
+}
+
+// Mission log: one line per decision, with the evidence that drove it
+export type LogType = 'science' | 'safety' | 'replan';
+export interface LogEntry {
+  id: string;
+  sol: number;
+  ts: string; // LST
+  type: LogType;
+  planVersion: string;
+  evidence: string;
+  decision: string;
+  approvedBy: string;
+  outcome: string;
 }
 
 export interface PlannerState {
@@ -58,6 +90,7 @@ export interface PlannerState {
   measured: string[]; // POI ids measured in the field by the astronauts
   sepAlert: boolean; // scripted SEP / DONKI alert (demo switch in Mission Control)
   crew: CrewMember[]; // crew status (simulated telemetry); dose is updated by the EVA debriefs
+  log: LogEntry[]; // mission log (plan versions, evidence, decisions)
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -159,6 +192,7 @@ export type ScheduleItem =
   | { kind: 'egress'; start: string; end: string }
   | { kind: 'travel'; from: string; to: string; km: number; minutes: number; start: string; end: string }
   | { kind: 'stop'; poi: Poi; order: number; start: string; end: string }
+  | { kind: 'shelter'; name: string; start: string; end: string }
   | { kind: 'ingress'; start: string; end: string };
 
 export interface MissionPlan {
@@ -182,6 +216,8 @@ export interface MissionPlan {
 export interface PlanContext {
   fieldEvents?: FieldEvent[];
   sepAlert?: boolean;
+  pair?: { id: string; name: string; doseActualMsv: number }[]; // EVA pair, for the dose-budget check
+  sol?: number;
 }
 
 // ── Terrain-following route geometry ────────────────────────────────────────
@@ -235,16 +271,36 @@ export const terrainLeg = (
   return out;
 };
 
+// Field shelter used when a replan diverts the route (the base is the other shelter)
+const FIELD_SHELTER = SHELTERS.find((sh: { id: string }) => sh.id === 'ALCOVE') ?? SHELTERS[SHELTERS.length - 1];
+export const FIELD_SHELTER_NAME = `${FIELD_SHELTER.name} (SEP shelter)`;
+
 /**
  * Route from the base through every stop and back, following the terrain, with a timed schedule.
  * Times come from the EVA model in analysis.ts: egress/ingress, walking speed reduced by slope,
  * soft soil and not-evaluated terrain, time on site set by mission control.
+ * A replan can shorten the time on site of a stop for this mission only (`durationOverrides`)
+ * and divert the route via the field shelter (`viaShelterAfter` = number of stops before it).
  */
 export const planMission = (mission: DailyMission, pois: Poi[], ctx: PlanContext = {}): MissionPlan => {
   const stops = mission.poiIds
     .map((id) => pois.find((p) => p.id === id))
-    .filter((p): p is Poi => Boolean(p));
-  const waypoints = [BASE, ...stops, BASE].map(({ lat, lon }) => ({ lat, lon }));
+    .filter((p): p is Poi => Boolean(p))
+    .map((p) => ({ ...p, durationMin: mission.durationOverrides?.[p.id] ?? p.durationMin }));
+  // Sequence walked: the POIs, plus the field shelter when the route is diverted via it
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const seq: any[] = [...stops];
+  if (mission.viaShelterAfter != null && stops.length) {
+    seq.splice(Math.min(mission.viaShelterAfter, stops.length), 0, {
+      id: 'SHELTER',
+      name: FIELD_SHELTER_NAME,
+      lat: FIELD_SHELTER.lat,
+      lon: FIELD_SHELTER.lon,
+      durationMin: 0,
+      isShelter: true
+    });
+  }
+  const waypoints = [BASE, ...seq, BASE].map(({ lat, lon }) => ({ lat, lon }));
   const legs = waypoints.slice(1).map((to, i) => {
     // Seed by the two endpoints: the same leg keeps the same shape in every mission
     const from = waypoints[i];
@@ -252,11 +308,12 @@ export const planMission = (mission: DailyMission, pois: Poi[], ctx: PlanContext
   });
   const path = legs.flatMap((leg, i) => (i === 0 ? leg : leg.slice(1)));
 
-  const metrics = computeMissionMetrics(waypoints, legs, stops, mission.startTime, ctx);
+  const metrics = computeMissionMetrics(waypoints, legs, seq, mission.startTime, ctx);
   const at = (min: number) => toHHMM(toMin(mission.startTime) + min);
-  const names = [BASE.name, ...stops.map((st) => st.id), BASE.name];
+  const names = [BASE.name, ...seq.map((st) => (st.isShelter ? st.name : st.id)), BASE.name];
 
   const schedule: ScheduleItem[] = [{ kind: 'egress', start: at(0), end: at(DEMO_ASSUMPTIONS.egressMin) }];
+  let order = 0;
   metrics.legStats.forEach((leg: { km: number; startMin: number; endMin: number }, i: number) => {
     schedule.push({
       kind: 'travel',
@@ -267,8 +324,9 @@ export const planMission = (mission: DailyMission, pois: Poi[], ctx: PlanContext
       start: at(leg.startMin),
       end: at(leg.endMin)
     });
-    const stop = stops[i];
-    if (stop) schedule.push({ kind: 'stop', poi: stop, order: i + 1, start: at(leg.endMin), end: at(leg.endMin + stop.durationMin) });
+    const stop = seq[i];
+    if (stop?.isShelter) schedule.push({ kind: 'shelter', name: stop.name, start: at(leg.endMin), end: at(leg.endMin) });
+    else if (stop) schedule.push({ kind: 'stop', poi: stop, order: ++order, start: at(leg.endMin), end: at(leg.endMin + stop.durationMin) });
   });
   const lastArrival = metrics.legStats.length ? metrics.legStats[metrics.legStats.length - 1].endMin : DEMO_ASSUMPTIONS.egressMin;
   schedule.push({ kind: 'ingress', start: at(lastArrival), end: metrics.endLst });
@@ -285,13 +343,212 @@ export const planMission = (mission: DailyMission, pois: Poi[], ctx: PlanContext
     schedule,
     equipment: equipmentFor(mission, stops),
     metrics,
-    evaluation: evaluateConstraints(metrics, { sepAlert: ctx.sepAlert })
+    evaluation: evaluateConstraints(metrics, { sepAlert: ctx.sepAlert, pair: ctx.pair, sol: ctx.sol })
   };
 };
 
-/** Plan of a mission with the shared context (field reports slow the route, SEP alert). */
+/**
+ * Plan of a mission with the shared context: field reports slow the route, the SEP alert
+ * applies to today's EVA only, and the EVA pair must have dose budget left.
+ */
 export const planFor = (state: PlannerState, mission: DailyMission) =>
-  planMission(mission, state.pois, { fieldEvents: state.fieldEvents, sepAlert: state.sepAlert });
+  planMission(mission, state.pois, {
+    fieldEvents: state.fieldEvents,
+    sepAlert: state.sepAlert && mission.sol === TODAY_SOL,
+    pair: crewAssignment(state.crew, mission)
+      .filter((c) => c.seatNow === 'EV1' || c.seatNow === 'EV2')
+      .map((c) => ({ id: c.id, name: c.name, doseActualMsv: c.doseActualMsv })),
+    sol: mission.sol
+  });
+
+// ── NO-GO → suggested replan ────────────────────────────────────────────────
+export const APPROVER = 'Flight Dir. M. Vance';
+export type ReplanStepCode = 'crew' | 'a' | 'b' | 'c' | 'd';
+export interface ReplanStep {
+  code: ReplanStepCode;
+  text: string;
+}
+export interface PlanSummary {
+  sol: number;
+  poiIds: string[];
+  km: number;
+  durationMin: number;
+  bufferMin: number;
+  doseMsv: number;
+  shelterMin: number;
+  viaShelter: boolean;
+  overall: string;
+  violated: string[]; // names of the violated constraints
+  pair: string[]; // names of the EVA pair
+}
+export interface ReplanRecord {
+  fromVersion: number;
+  toVersion: number;
+  ts: string;
+  reason: string; // the binding constraint of the plan that was NO-GO
+  steps: ReplanStep[];
+  before: PlanSummary;
+  after: PlanSummary;
+}
+export interface ReplanSuggestion extends Omit<ReplanRecord, 'ts'> {
+  mission: DailyMission; // the replanned mission (not saved yet)
+  ok: boolean; // false when no compliant plan was found
+}
+
+export const missionVersion = (m: DailyMission) => m.version ?? 1;
+
+export const summarizePlan = (state: PlannerState, mission: DailyMission): PlanSummary => {
+  const plan = planFor(state, mission);
+  const m = plan.metrics;
+  return {
+    sol: mission.sol,
+    poiIds: plan.stops.map((p) => p.id),
+    km: m.distanceKm,
+    durationMin: m.evaDurationMin,
+    bufferMin: m.bufferMin,
+    doseMsv: m.doseEvaMsv,
+    shelterMin: m.maxTimeToShelterMin,
+    viaShelter: m.viaShelter,
+    overall: plan.evaluation.overall,
+    violated: plan.evaluation.rows.filter((r: { status: string }) => r.status === 'violated').map((r: { name: string }) => r.name),
+    pair: crewAssignment(state.crew, mission)
+      .filter((c) => c.seatNow.startsWith('EV'))
+      .map((c) => c.name)
+  };
+};
+
+const PRIORITY_ORDER: Record<string, number> = { HIGH: 0, MED: 1, LOW: 2, NONE: 3 };
+
+/**
+ * When a mission is NO-GO, proposes a plan that meets every constraint. Strategy, in order:
+ *  (a) drop the lowest-priority (then farthest) POI;
+ *  (b) shorten the time on site of the non-priority POIs;
+ *  (c) divert the route via the nearest field shelter;
+ *  (d) postpone the EVA to the next free sol.
+ * Before that, an EVA crew member without dose budget is swapped with someone from the habitat.
+ * Returns null when the mission is not NO-GO.
+ */
+export const suggestReplan = (state: PlannerState, mission: DailyMission): ReplanSuggestion | null => {
+  const A = DEMO_ASSUMPTIONS;
+  const first = planFor(state, mission);
+  if (first.evaluation.overall !== 'violated' || !first.stops.length) return null;
+  const badIds = (m: DailyMission): string[] =>
+    planFor(state, m)
+      .evaluation.rows.filter((r: { status: string }) => r.status === 'violated')
+      .map((r: { id: string }) => r.id);
+  const isGo = (m: DailyMission) => badIds(m).length === 0;
+  const TIME_IDS = ['duration', 'buffer', 'latest', 'consumables', 'dose', 'sepDuration'];
+  const routeBad = (ids: string[]) => ids.filter((id) => id !== 'sepVia' && !id.startsWith('crewDose'));
+  const poiOf = (id: string) => state.pois.find((p) => p.id === id);
+  const steps: ReplanStep[] = [];
+  let cur: DailyMission = { ...mission };
+
+  // Best position for the field shelter in the current stop list: a GO plan first, then the shortest
+  const withShelter = (m: DailyMission): DailyMission => {
+    const options = Array.from({ length: m.poiIds.length + 1 }, (_, i) => ({ ...m, viaShelterAfter: i }));
+    const km = (x: DailyMission) => planFor(state, x).metrics.distanceKm;
+    return options.sort((x, y) => Number(isGo(y)) - Number(isGo(x)) || km(x) - km(y))[0];
+  };
+
+  // Crew: swap anyone on the EVA pair who has no dose budget left
+  const exhausted = badIds(cur).filter((id) => id.startsWith('crewDose-')).map((id) => id.replace('crewDose-', ''));
+  if (exhausted.length) {
+    const seated = crewAssignment(state.crew, cur);
+    const pair = seated.filter((c) => c.seatNow.startsWith('EV')).map((c) => c.id);
+    const bench = seated
+      .filter((c) => c.seatNow.startsWith('IV'))
+      .sort((x, y) => remainingEvasByDose(y.doseActualMsv, cur.sol) - remainingEvasByDose(x.doseActualMsv, cur.sol));
+    exhausted.forEach((id) => {
+      const sub = bench.shift();
+      if (!sub || remainingEvasByDose(sub.doseActualMsv, cur.sol) < 1) return;
+      const out = seated.find((c) => c.id === id);
+      pair[pair.indexOf(id)] = sub.id;
+      steps.push({ code: 'crew', text: `EVA pair rotated: ${sub.name} replaces ${out?.name} (no dose budget left for an EVA)` });
+    });
+    cur = { ...cur, evaPair: pair as [string, string] };
+  }
+
+  // (a) drop one POI: a removal that gives a GO plan if there is one, else lowest priority, then farthest
+  const dropOne = (): boolean => {
+    if (cur.poiIds.length <= 1) return false;
+    const rank = (id: string) => PRIORITY_ORDER[poiOf(id)?.priority ?? 'NONE'];
+    const far = (id: string) => (poiOf(id) ? marsDistanceKm(BASE, poiOf(id) as Poi) : 0);
+    const without = (id: string) => {
+      const m = { ...cur, poiIds: cur.poiIds.filter((x) => x !== id) };
+      return cur.viaShelterAfter != null ? withShelter(m) : m;
+    };
+    const pick = [...cur.poiIds].sort(
+      (x, y) => Number(isGo(without(y))) - Number(isGo(without(x))) || rank(y) - rank(x) || far(y) - far(x)
+    )[0];
+    const before = planFor(state, cur).metrics.evaDurationMin;
+    cur = without(pick);
+    const after = planFor(state, cur).metrics.evaDurationMin;
+    const poi = poiOf(pick);
+    steps.push({
+      code: 'a',
+      text: `Dropped ${pick} (${poi?.priority ? PRIORITY_META[poi.priority].label.toLowerCase() : 'no'} priority, ${far(pick).toFixed(2)} km from the base): EVA shortened ${before} → ${after} min`
+    });
+    return true;
+  };
+  if (routeBad(badIds(cur)).length) dropOne();
+
+  // (b) shorten the time on site of the non-priority POIs
+  if (badIds(cur).some((id) => TIME_IDS.includes(id))) {
+    const overrides: Record<string, number> = { ...cur.durationOverrides };
+    const trimmed: string[] = [];
+    cur.poiIds.forEach((id) => {
+      const poi = poiOf(id);
+      const now = overrides[id] ?? poi?.durationMin ?? 0;
+      if (poi && poi.priority !== 'HIGH' && now > A.minStationMin) {
+        overrides[id] = A.minStationMin;
+        trimmed.push(`${id} ${now} → ${A.minStationMin} min`);
+      }
+    });
+    if (trimmed.length) {
+      cur = { ...cur, durationOverrides: overrides };
+      steps.push({ code: 'b', text: `Time on site shortened at the non-priority stops: ${trimmed.join(', ')}` });
+    }
+  }
+
+  // (c) divert the route via the nearest field shelter
+  if (badIds(cur).includes('sepVia')) {
+    const before = planFor(state, cur).metrics.distanceKm;
+    cur = withShelter(cur);
+    const after = planFor(state, cur).metrics.distanceKm;
+    steps.push({ code: 'c', text: `Route diverted via ${FIELD_SHELTER.name}, the nearest field shelter (+${Math.max(0, after - before).toFixed(2)} km)` });
+  }
+
+  // (a) again, until the route is compliant or one stop is left
+  while (routeBad(badIds(cur)).length && dropOne());
+
+  // (d) postpone to the next free sol
+  if (!isGo(cur)) {
+    const used = new Set(state.missions.filter((m) => m.id !== mission.id).map((m) => m.sol));
+    let sol = mission.sol + 1;
+    while (used.has(sol)) sol++;
+    const postponedOriginal: DailyMission = { ...mission, evaPair: cur.evaPair, sol };
+    const postponedTrimmed: DailyMission = { ...cur, sol };
+    if (isGo(postponedOriginal)) {
+      cur = postponedOriginal;
+      steps.length = 0;
+      steps.push({ code: 'd', text: `EVA postponed to Sol ${sol} with the original stops: no compliant EVA on Sol ${mission.sol}` });
+    } else if (isGo(postponedTrimmed)) {
+      cur = postponedTrimmed;
+      steps.push({ code: 'd', text: `EVA postponed to Sol ${sol}: still not compliant on Sol ${mission.sol}` });
+    }
+  }
+
+  return {
+    mission: cur,
+    ok: isGo(cur),
+    fromVersion: missionVersion(mission),
+    toVersion: missionVersion(mission) + 1,
+    reason: missionReason(first.evaluation, first.metrics).replace(/^NO-GO: /, ''),
+    steps,
+    before: summarizePlan(state, mission),
+    after: summarizePlan(state, cur)
+  };
+};
 
 /** Material to bring: instruments required at each stop + sample kit + extras chosen by control. */
 export const equipmentFor = (mission: DailyMission, stops: Poi[]) => {
@@ -397,21 +654,38 @@ export const SEED_STATE: PlannerState = {
       startTime: '09:30',
       poiIds: ['POI-1', 'POI-2'],
       extraEquipment: ['Spare battery pack', 'Navigation tablet'],
-      status: 'sent'
+      status: 'sent',
+      version: 1,
+      approvedBy: 'Flight Dir. M. Vance'
     },
     {
+      // Draft: POI-3 lies above the 19.4° delta scarp, on terrain not evaluated from orbit → NO-GO until replanned
       id: 'M-seed-25',
       sol: 25,
-      startTime: '10:00',
-      poiIds: ['POI-3'],
+      startTime: '09:30',
+      poiIds: ['POI-2', 'POI-3'],
       extraEquipment: ['Comms relay'],
-      status: 'sent'
+      status: 'draft',
+      version: 1
     }
   ],
   packed: {},
   measured: [],
   sepAlert: false,
   crew: [], // filled below with CREW_ROSTER (declared after the seed)
+  log: [
+    {
+      id: 'LOG-024-1',
+      sol: 24,
+      ts: 'Sol 24 · 08:30 LST',
+      type: 'science',
+      planVersion: 'v1',
+      evidence: 'Orbital CRISM prior: Fe/Mg smectite on the delta front, olivine + carbonate in Séítah',
+      decision: 'Sol 24 EVA to POI-1 and POI-2',
+      approvedBy: 'Flight Dir. M. Vance',
+      outcome: 'Plan v1 sent to the crew'
+    }
+  ],
   // Candidate field events & rapid in-situ discoveries (Sol 24)
   fieldEvents: [
     {
