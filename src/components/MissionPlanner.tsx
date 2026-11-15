@@ -1394,6 +1394,50 @@ const STATUS_META = {
   violated: { label: 'Violated', cls: 'mh-pill--crit', color: '#E5484D' }
 };
 
+// Constraint value / margin formatting (shared by the table, the GO/NO-GO banner and route reasons)
+const unitSuffix = (u) => (!u || u === 'LST' ? '' : u === '°' || u === '%' ? u : ` ${u}`);
+const constraintValue = (r, v) => `${r.fmt(v)}${unitSuffix(r.unit)}`;
+const constraintMargin = (r) => {
+  if (r.id === 'sep') return 'active';
+  const mag = Math.abs(r.margin);
+  const txt =
+    r.id === 'slope' || r.id === 'notEvaluated' ? mag.toFixed(1) : r.id === 'dose' ? mag.toFixed(2) : Math.round(mag);
+  return `${r.margin >= 0 ? '+' : '−'}${txt}${r.unit === 'LST' ? ' min' : unitSuffix(r.unit)}`;
+};
+const constraintShort = (r, m) => {
+  switch (r.id) {
+    case 'duration':
+      return `EVA ${r.value} min > ${r.limit} min`;
+    case 'buffer':
+      return `buffer ${r.value} min (min ${r.limit})`;
+    case 'latest':
+      return `back ${r.fmt(r.value)} > ${r.fmt(r.limit)}`;
+    case 'slope':
+      return `${r.value.toFixed(1)}° ${m?.maxSlopeName?.toLowerCase() ?? 'slope'}`;
+    case 'shelter':
+      return `${Math.round(r.value)} min to shelter`;
+    case 'consumables':
+      return `consumables ${Math.round(r.value)}% left`;
+    case 'notEvaluated':
+      return `${r.value.toFixed(0)}% not evaluated`;
+    case 'dose':
+      return `EVA dose ${r.value.toFixed(2)} mSv`;
+    default:
+      return r.name;
+  }
+};
+// One-line route verdict, e.g. "Rejected: buffer −10 min (min 45) · 19.4° delta scarp"
+const routeReason = (ev, m) => {
+  const rank = ['sep', 'buffer', 'slope', 'dose', 'shelter', 'consumables', 'duration', 'latest', 'notEvaluated'];
+  const bad = ev.rows
+    .filter((r) => r.status === 'violated')
+    .sort((a, b) => rank.indexOf(a.id) - rank.indexOf(b.id));
+  if (bad.length) return `Rejected: ${bad.slice(0, 2).map((r) => constraintShort(r, m)).join(' · ')}`;
+  const watch = ev.rows.filter((r) => r.status === 'watch');
+  if (watch.length) return `Watch: ${watch.map((r) => constraintShort(r, m)).join(' · ')}`;
+  return m.contingency ? 'Pre-authorized SEP divert · all constraints met' : `All constraints met · buffer ${m.bufferMin} min`;
+};
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN APPLICATION COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2643,24 +2687,82 @@ export default function MissionPlanner() {
   );
 
   // Mission Control: crew status reacts to the demo stepper (Sol 2 = EVA in progress, Sol 3 = SEP)
-  const crewStatus = useMemo(
-    () =>
-      CREW_ROSTER.map((c) => {
-        const evaToday = mission.demoScriptSol >= 2 && c.onEva ? 0.04 : 0;
-        const sepExtra = sepAlertActive ? (c.onEva ? 1.6 : 0.35) : 0;
-        const doseActualMsv = +(c.doseActualMsv + evaToday + sepExtra).toFixed(2);
-        const doseDeltaPct = Math.round((doseActualMsv / c.dosePlannedMsv - 1) * 100);
-        const heartRate = c.vitals.heartRate + (sepAlertActive && c.onEva ? 14 : 0);
-        const health =
-          sepAlertActive && c.onEva
-            ? { label: 'Medical review', cls: 'mh-pill--crit' }
-            : c.fatigue === 'Moderate' || doseDeltaPct > 0
-            ? { label: 'Monitor', cls: 'mh-pill--warn' }
-            : { label: 'Nominal', cls: 'mh-pill--ok' };
-        return { ...c, doseActualMsv, doseDeltaPct, heartRate, health };
-      }),
-    [mission.demoScriptSol, sepAlertActive]
-  );
+  // Doses come from the route model: Sol 2 = today's EVA half done, Sol 3 = SEP dose on the shelter divert.
+  const crewStatus = useMemo(() => {
+    const A = DEMO_ASSUMPTIONS;
+    const toMsv = (ugyPerH, minutes) => (ugyPerH * (minutes / 60) * A.qualityFactor) / 1000;
+    const typicalEvaDose = toMsv(A.doseRateNominalUgyH, 240); // a typical 4 h EVA
+    const sol = 23 + mission.demoScriptSol;
+    const plannedEva = routeMetrics[mission.selectedRoute];
+    return CREW_ROSTER.map((c) => {
+      let evaToday = 0;
+      if (c.onEva && mission.demoScriptSol >= 2) {
+        evaToday = sepAlertActive
+          ? routeMetrics.SHELTER?.doseEvaMsv ?? 0
+          : toMsv(A.doseRateNominalUgyH, (plannedEva?.evaDurationMin ?? 0) / 2);
+      }
+      const ivSep = !c.onEva && sepAlertActive ? toMsv(A.doseRateSepUgyH * A.stormShelterFactor, 120) : 0;
+      const doseActualMsv = +(c.doseActualMsv + evaToday + ivSep).toFixed(2);
+      const doseDeltaMsv = doseActualMsv - c.dosePlannedMsv;
+      const doseDeltaPct = Math.round((doseActualMsv / c.dosePlannedMsv - 1) * 100);
+      const heartRate = c.vitals.heartRate + (sepAlertActive && c.onEva ? 14 : 0);
+      const remainingEvas = remainingEvasByDose({ doseActualMsv }, A, typicalEvaDose, sol);
+      const health =
+        sepAlertActive && c.onEva
+          ? { label: 'Medical review', cls: 'mh-pill--crit' }
+          : c.fatigue === 'Moderate' || doseDeltaMsv > 0
+          ? { label: 'Monitor', cls: 'mh-pill--warn' }
+          : { label: 'Nominal', cls: 'mh-pill--ok' };
+      return { ...c, doseActualMsv, doseDeltaMsv, doseDeltaPct, heartRate, health, remainingEvas };
+    });
+  }, [mission.demoScriptSol, mission.selectedRoute, sepAlertActive, routeMetrics]);
+
+  // Mission Control: approve the selected route as a new plan version (writes into the plan registry)
+  const handleApprovePlan = () => {
+    const rt = mission.routes[mission.selectedRoute];
+    const m = routeMetrics[rt.id];
+    const ev = routeEvaluations[rt.id];
+    if (!rt || !m || !ev || ev.overall === 'violated') return;
+    const version = `v${mission.planVersions.length + 1}`;
+    const prevRoute = mission.routes[activePlanObj.routeId];
+    const short = (r) => r?.name.split('(')[0].trim();
+    const entry = {
+      version,
+      sol: `Sol ${23 + mission.demoScriptSol} (Mission Control)`,
+      ts: `SOL ${23 + mission.demoScriptSol} · ${m.startLst} LST plan`,
+      trigger: `Route change approved by Mission Control (${short(prevRoute)} → ${short(rt)})`,
+      approvedBy: 'Flight Dir. M. Vance (Mission Control)',
+      routeId: rt.id,
+      poiOrder: m.stops.filter((s) => s.poiId && !s.skipped).map((s) => s.poiId),
+      diffSummary: `Plan ${version}: ${short(rt)} · back in HAB ${m.endLst} LST`,
+      diffItems: [
+        `Route ${short(prevRoute)} → ${short(rt)} (${m.distanceKm.toFixed(2)} km, ${m.evaDurationMin} min EVA)`,
+        `Binding constraint: ${ev.determinant.name} (margin ${constraintMargin(ev.determinant)})`
+      ],
+      reason: routeReason(ev, m)
+    };
+    setMission((prev) => ({
+      ...prev,
+      planVersions: [...prev.planVersions, entry],
+      activePlanVersion: version
+    }));
+    triggerToast(`Plan ${version} approved: ${short(rt)}. Ready to send to the Astronaut HUD.`);
+  };
+
+  // Profile click → highlight that stretch (contiguous steep / not-evaluated band) on the map
+  const highlightProfileBand = (m, seg) => {
+    const segs = m.segments;
+    let i = segs.indexOf(seg);
+    if (i < 0) return;
+    const same = (g) => g.steep === seg.steep && g.ne === seg.ne;
+    let lo = i;
+    let hi = i;
+    while (lo > 0 && same(segs[lo - 1])) lo--;
+    while (hi < segs.length - 1 && same(segs[hi + 1])) hi++;
+    const pts = [segs[lo].a, ...segs.slice(lo, hi + 1).map((g) => g.b)];
+    setHighlightPts(pts);
+    mapInstanceRef.current?.fitBounds(pts, { padding: [80, 80], maxZoom: 17, animate: true });
+  };
 
   return (
     // Desktop (lg+): app shell exactly one screen tall — the page never scrolls, only the right panel does
@@ -3429,281 +3531,453 @@ export default function MissionPlanner() {
             </>
           )}
 
-          {/* ═══════════════════════════ ROLE 2: MISSION CONTROL ═══════════════════════════ */}
-          {currentRole === 'control' && (
-            <>
-              <Card
-                eyebrow="Crew health & radiation"
-                title="Astronauts status"
-                icon={Users}
-                aside={<span className="mh-pill mh-pill--warn">Simulated telemetry</span>}
-                collapsible
-              >
-                {sepAlertActive && (
-                  <div className="mh-alert !bg-mh-crit-bg !text-mh-crit" role="alert">
-                    <AlertTriangle className="w-5 h-5 shrink-0" aria-hidden="true" />
-                    <p className="m-0 flex-1">
-                      <strong>SEP event:</strong> EVA crew dose above plan — flight surgeon review
-                      required.
+          {/* ═══════════════════════════ ROLE 2: MISSION CONTROL ═══════════════════════════
+              Safety first: GO / NO-GO, crew, routes, route detail, environment, plan registry. */}
+          {currentRole === 'control' &&
+            (() => {
+              const A = DEMO_ASSUMPTIONS;
+              const rt = mission.routes[mission.selectedRoute];
+              const m = routeMetrics[rt.id];
+              const ev = routeEvaluations[rt.id];
+              const det = ev.determinant;
+              const go = ev.overall !== 'violated';
+              const approved = activePlanObj.routeId === rt.id;
+              const nextVersion = `v${mission.planVersions.length + 1}`;
+              const short = (r) => r.name.split('(')[0].trim();
+              const evCrew = crewStatus.filter((c) => c.onEva);
+              const tau = sepAlertActive ? 2.4 : 0.45; // MEDA historical (Sol 455) / scripted dust front
+              const [ddStart, ddEnd] = A.dustDevilWindowLst;
+              const overlapMin = Math.max(
+                0,
+                Math.min(lstToMin(m.endLst), lstToMin(ddEnd)) - Math.max(lstToMin(m.startLst), lstToMin(ddStart))
+              );
+              const bannerCls =
+                ev.overall === 'violated'
+                  ? 'bg-mh-crit-bg text-mh-crit'
+                  : ev.overall === 'watch'
+                  ? 'bg-mh-warn-bg text-mh-warn'
+                  : 'bg-mh-ok-bg text-mh-ok';
+              // Timeline bar: from the earliest start to the latest return of the window
+              const t0 = Math.min(lstToMin(mission.timeWindow.suggestedStart), lstToMin(m.startLst)) - 30;
+              const t1 = Math.max(lstToMin(mission.timeWindow.latestReturn), lstToMin(m.endLst)) + 30;
+              const tx = (lst) => 4 + ((lstToMin(lst) - t0) / (t1 - t0)) * 292;
+              return (
+                <>
+                  {/* 1. GO / NO-GO banner */}
+                  <section className={`rounded-mh-lg shadow-mh p-5 sm:p-6 flex flex-col gap-3 shrink-0 ${bannerCls}`} aria-live="polite">
+                    <div className="flex flex-wrap items-center gap-3">
+                      {go ? (
+                        <CheckCircle2 className="w-9 h-9 shrink-0" aria-hidden="true" />
+                      ) : (
+                        <ShieldAlert className="w-9 h-9 shrink-0" aria-hidden="true" />
+                      )}
+                      <span className="text-[30px] leading-none font-extrabold tracking-[-0.01em]">
+                        {go ? (ev.overall === 'watch' ? 'GO · watch' : 'GO') : 'NO-GO'}
+                      </span>
+                      <span className="text-[18px] font-semibold text-mh-text">{short(rt)}</span>
+                    </div>
+                    <p className="m-0 text-base text-mh-text">
+                      Binding constraint: <strong>{det.name}</strong> — {constraintValue(det, det.value)}
+                      {det.id !== 'sep' && (
+                        <>
+                          {' '}
+                          vs {det.dir === 'max' ? '≤' : '≥'} {constraintValue(det, det.limit)} · margin{' '}
+                          <strong>{constraintMargin(det)}</strong>
+                        </>
+                      )}
                     </p>
-                  </div>
-                )}
-                <ul className="m-0 p-0 list-none flex flex-col gap-3">
-                  {crewStatus.map((c) => {
-                    const fillPct = Math.min(100, (c.doseActualMsv / c.dosePlannedMsv) * 100);
-                    const over = c.doseDeltaPct > 0;
-                    return (
-                      <li key={c.id} className="mh-tile !gap-3">
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <span className="flex flex-col min-w-0">
-                            <strong className="text-base">
-                              {c.id} · {c.name}
-                            </strong>
-                            <span className="text-base text-mh-text2">
-                              {c.role}
-                              {c.onEva && mission.demoScriptSol >= 2 ? ' · on EVA now' : ''}
-                            </span>
-                          </span>
-                          <span className={`mh-pill shrink-0 ${c.health.cls}`}>{c.health.label}</span>
-                        </div>
+                    {sepAlertActive && (
+                      <p className="m-0 text-base text-mh-text">
+                        <strong>SEP alert active.</strong> Only the pre-authorized shelter route is allowed.
+                      </p>
+                    )}
+                    <div className="flex flex-wrap items-center gap-2 text-mh-text">
+                      <span className="mh-pill mh-pill--info">Plan {mission.activePlanVersion}</span>
+                      {approved ? (
+                        <span className="text-base">
+                          Approved by {activePlanObj.approvedBy}
+                        </span>
+                      ) : (
+                        <>
+                          <span className="text-base">Route differs from the active plan · approval pending</span>
+                          <button
+                            type="button"
+                            onClick={handleApprovePlan}
+                            disabled={!go}
+                            className="mh-btn mh-btn--primary !min-h-10"
+                            title={go ? 'Write this route into the plan registry' : 'A NO-GO route cannot be approved'}
+                          >
+                            Approve plan {nextVersion}
+                          </button>
+                        </>
+                      )}
+                      <SimBadge label="demo model" />
+                    </div>
+                  </section>
 
-                        <div className="flex flex-col gap-1">
-                          <div className="flex flex-wrap items-baseline justify-between gap-2">
-                            <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">
-                              Radiation dose (surface, cumulative)
+                  {/* 2. Crew status */}
+                  <Card
+                    eyebrow="Crew health & radiation"
+                    title="Crew status"
+                    icon={Users}
+                    aside={<SimBadge label="simulated" />}
+                    collapsible
+                  >
+                    {sepAlertActive && (
+                      <div className="mh-alert !bg-mh-crit-bg !text-mh-crit" role="alert">
+                        <AlertTriangle className="w-5 h-5 shrink-0" aria-hidden="true" />
+                        <p className="m-0 flex-1">
+                          <strong>SEP event:</strong> EVA crew dose rising — flight surgeon review required.
+                        </p>
+                      </div>
+                    )}
+                    <ul className="m-0 p-0 list-none flex flex-col gap-3">
+                      {crewStatus.map((c) => {
+                        const over = c.doseDeltaMsv > 0;
+                        const fillPct = Math.min(100, (c.doseActualMsv / c.dosePlannedMsv) * 100);
+                        return (
+                          <li key={c.id} className={`mh-tile !gap-3 ${over ? 'ring-2 ring-[#E5C04A]' : ''}`}>
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <span className="flex flex-col min-w-0">
+                                <strong className="text-base">
+                                  {c.id} · {c.name}
+                                </strong>
+                                <span className="text-base text-mh-text2">
+                                  {c.role} · {c.onEva ? 'EVA' : 'IV (in HAB)'}
+                                  {c.onEva && mission.demoScriptSol >= 2 ? ' · outside now' : ''}
+                                </span>
+                              </span>
+                              <span className={`mh-pill shrink-0 ${c.health.cls}`}>{c.health.label}</span>
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                                <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">
+                                  Dose actual vs planned
+                                </span>
+                                <span className={`text-base font-semibold ${over ? 'text-mh-warn' : ''}`}>
+                                  {c.doseActualMsv.toFixed(2)} / {c.dosePlannedMsv.toFixed(1)} mSv
+                                </span>
+                              </div>
+                              <div
+                                className="mh-progress"
+                                role="meter"
+                                aria-valuemin={0}
+                                aria-valuemax={c.dosePlannedMsv}
+                                aria-valuenow={c.doseActualMsv}
+                                aria-label={`${c.id} measured dose versus planned`}
+                              >
+                                <span style={{ width: `${fillPct}%`, background: over ? '#E5C04A' : 'var(--mh-ok)' }} />
+                              </div>
+                              <span className="text-base text-mh-text2">
+                                {over ? '+' : '−'}
+                                {Math.abs(c.doseDeltaMsv).toFixed(2)} mSv ({over ? '+' : ''}
+                                {c.doseDeltaPct}%) {over ? 'above plan' : 'within plan'} · budget {A.crewSurfaceDoseBudgetMsv} mSv
+                              </span>
+                            </div>
+                            <span className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                              <Stat label="EVAs done" value={c.evasCompleted} />
+                              <Stat label="EVAs left" value={c.remainingEvas} />
+                              <Stat label="Heart rate" value={`${c.heartRate} bpm`} />
+                              <Stat label="SpO₂" value={`${c.vitals.spo2}%`} />
+                              <Stat label="Sleep" value={`${c.vitals.sleepH} h`} />
+                              <Stat label="Fatigue" value={c.fatigue} />
                             </span>
-                            <span className={`text-base font-semibold ${over ? 'text-mh-crit' : ''}`}>
-                              {c.doseActualMsv.toFixed(2)} / {c.dosePlannedMsv.toFixed(1)} mSv
+                            <span className="flex items-start gap-2 text-base text-mh-text2">
+                              <HeartPulse className="w-5 h-5 shrink-0 mt-0.5" aria-hidden="true" />
+                              <span>Psych: {c.psych}</span>
                             </span>
-                          </div>
-                          <div
-                            className="mh-progress"
-                            role="meter"
-                            aria-valuemin={0}
-                            aria-valuemax={c.dosePlannedMsv}
-                            aria-valuenow={c.doseActualMsv}
-                            aria-label={`${c.id} measured dose versus planned`}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <p className="m-0 text-[13px] text-mh-text2">
+                      EVAs left = (budget − actual − future habitat dose) ÷ per-EVA allocation (nominal EVA +{' '}
+                      {A.sepMinWarningMin} min worst-case SEP). NASA career limit {A.nasaCareerLimitMsv} mSv
+                      (NASA-STD-3001) shown for context only.
+                    </p>
+                  </Card>
+
+                  {/* 3. Routes */}
+                  <Card
+                    eyebrow="Routes"
+                    title="Route options"
+                    icon={Compass}
+                    subtitle="Click a route here or on the map. Thresholds are demo parameters."
+                    collapsible
+                  >
+                    <div className="flex flex-col gap-2" role="radiogroup" aria-label="EVA route">
+                      {Object.values(mission.routes).map((r, i) => {
+                        const isSel = r.id === rt.id;
+                        const rm = routeMetrics[r.id];
+                        const re = routeEvaluations[r.id];
+                        const st = STATUS_META[re.overall];
+                        return (
+                          <button
+                            key={r.id}
+                            type="button"
+                            role="radio"
+                            aria-checked={isSel}
+                            onClick={() => handleSelectRoute(r.id)}
+                            className={`w-full text-left p-3 rounded-mh-md border-2 cursor-pointer transition-colors flex items-center gap-3 text-mh-text ${
+                              isSel ? 'bg-mh-fill-blue border-mh-primary' : 'bg-mh-fill border-transparent'
+                            }`}
                           >
                             <span
-                              style={{
-                                width: `${fillPct}%`,
-                                background: over ? 'var(--mh-crit)' : 'var(--mh-ok)'
-                              }}
-                            />
-                          </div>
-                          <span className="text-base text-mh-text2">
-                            Measured vs planned:{' '}
-                            {over ? `+${c.doseDeltaPct}% above plan` : `${c.doseDeltaPct}% (within plan)`}
-                          </span>
-                        </div>
-
-                        <span className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                          <Stat label="EVAs done" value={c.evasCompleted} />
-                          <Stat label="Heart rate" value={`${c.heartRate} bpm`} />
-                          <Stat label="SpO₂" value={`${c.vitals.spo2}%`} />
-                          <Stat label="Sleep" value={`${c.vitals.sleepH} h`} />
-                        </span>
-                        <span className="flex items-start gap-2 text-base text-mh-text2">
-                          <HeartPulse className="w-5 h-5 shrink-0 mt-0.5" aria-hidden="true" />
-                          <span>
-                            Fatigue {c.fatigue.toLowerCase()} · Psych: {c.psych}
-                          </span>
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </Card>
-
-              <Card
-                eyebrow="Optimizer"
-                title="Jezero route comparison"
-                icon={Compass}
-                subtitle="Thresholds are demo parameters. Click a route to see its data and show it on the map."
-                collapsible
-              >
-                <div className="flex flex-col gap-2" role="radiogroup" aria-label="EVA route">
-                  {Object.values(mission.routes).map((rt, rtIdx) => {
-                    const isSelected = mission.selectedRoute === rt.id;
-                    const bufferOk = rt.bufferMin >= mission.timeWindow.returnBufferMin;
-                    const doseRate = sepAlertActive ? DOSE_RATE_SEP_UGY_H : DOSE_RATE_NOMINAL_UGY_H;
-                    const expectedDose = (rt.evaDurationMin / 60) * doseRate;
-                    const eta = addMinutesToLst(mission.timeWindow.suggestedStart, rt.evaDurationMin);
-                    return (
-                      <button
-                        key={rt.id}
-                        type="button"
-                        role="radio"
-                        aria-checked={isSelected}
-                        aria-expanded={isSelected}
-                        onClick={() => setMission((prev) => ({ ...prev, selectedRoute: rt.id }))}
-                        className={`w-full text-left p-4 rounded-mh-md border-2 cursor-pointer transition-colors flex flex-col gap-3 text-mh-text ${
-                          isSelected ? 'bg-mh-fill-blue border-mh-primary' : 'bg-mh-fill border-transparent'
-                        }`}
-                      >
-                        <span className="flex items-center justify-between gap-3">
-                          <span className="flex items-center gap-3 min-w-0">
-                            <span
                               className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center font-mono text-[13px] font-medium text-white"
-                              style={{ background: rt.color }}
+                              style={{ background: r.color }}
                               aria-hidden="true"
                             >
-                              {rtIdx + 1}
+                              {i + 1}
                             </span>
-                            <span className="flex flex-col min-w-0">
+                            <span className="min-w-0 flex-1 flex flex-col">
                               <span className="text-base font-semibold">
-                                Route {rtIdx + 1} · {rt.name.split('(')[0].replace(/^Route\s+/, '').trim()}
+                                Route {i + 1} · {short(r).replace(/^Route\s+/, '')}
                               </span>
-                              {!isSelected && (
-                                <span className="text-base text-mh-text2">
-                                  ETA {eta} LST · {formatDuration(rt.evaDurationMin)}
-                                </span>
-                              )}
+                              <span className="text-[14px] text-mh-text2">{routeReason(re, rm)}</span>
                             </span>
-                          </span>
-                          <span className="flex items-center gap-2 shrink-0">
-                            <span className={`mh-pill ${bufferOk ? 'mh-pill--ok' : 'mh-pill--crit'}`}>
-                              {bufferOk ? 'Buffer OK' : 'Over limit'}
-                            </span>
-                            <ChevronDown
-                              className={`w-5 h-5 text-mh-text2 transition-transform ${isSelected ? 'rotate-180' : ''}`}
-                              aria-hidden="true"
-                            />
-                          </span>
-                        </span>
-
-                        {isSelected && (
-                          <>
-                            <span className="text-base text-mh-text2">{rt.name}</span>
-                            <span className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                              <Stat tile label="ETA at HAB" value={`${eta} LST`} />
-                              <Stat tile label="Total mission time" value={formatDuration(rt.evaDurationMin)} />
-                              <Stat tile label="Expected dose" value={formatDose(expectedDose)} />
-                            </span>
-                            <span className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                              <Stat label="Distance" value={`${rt.distanceKm} km`} />
-                              <Stat label="Elevation gain" value={`+${rt.elevationGainM} m`} />
-                              <Stat label="Max slope" value={`${rt.slopeMax}°`} />
-                              <Stat label="Return buffer" value={`${rt.bufferMin} min`} />
-                            </span>
-                            <span className="text-base text-mh-text2">
-                              Start {mission.timeWindow.suggestedStart} LST · latest return{' '}
-                              {mission.timeWindow.latestReturn} LST · dose at{' '}
-                              {sepAlertActive ? `${DOSE_RATE_SEP_UGY_H} µGy/h (SEP, unshielded)` : `${DOSE_RATE_NOMINAL_UGY_H} µGy/h (nominal)`}{' '}
-                              · coverage {rt.dataCoveragePct}%
-                            </span>
-                            <span className="text-base text-mh-text2">{rt.funnelYield}</span>
-                          </>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="flex flex-col gap-2">
-                  <span className="mh-eyebrow">Rejected options</span>
-                  {mission.optimizerResult.rejected.map((rej, idx) => (
-                    <div key={idx} className="mh-tile !gap-2">
-                      <span className="mh-pill mh-pill--crit self-start">Rejected</span>
-                      <strong className="text-base">{rej.option}</strong>
-                      <span className="text-base text-mh-text2">{rej.reason}</span>
+                            <span className={`mh-pill ${st.cls} shrink-0`}>{st.label}</span>
+                          </button>
+                        );
+                      })}
                     </div>
-                  ))}
-                </div>
-              </Card>
+                  </Card>
 
-              <Card
-                // Remounts when the SEP alert toggles so the card auto-opens on the alert
-                key={sepAlertActive ? 'env-sep' : 'env'}
-                eyebrow="Environment"
-                title="EVA window & MEDA weather"
-                icon={Radio}
-                aside={<span className="mh-pill mh-pill--warn">Historical data</span>}
-                collapsible
-                defaultOpen={sepAlertActive}
-              >
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Stat
-                    tile
-                    label="Suggested EVA window"
-                    value={`${mission.timeWindow.suggestedStart} – ${mission.timeWindow.latestReturn} LST`}
-                  />
-                  <Stat tile label="Daylight" value="08:00–16:00 LST" />
-                </div>
-                <p className="m-0 text-base">{mission.weatherCard.medaContext}</p>
-                {sepAlertActive ? (
-                  <div className="mh-alert !bg-mh-crit-bg !text-mh-crit" role="alert">
-                    <AlertTriangle className="w-5 h-5 shrink-0" aria-hidden="true" />
-                    <p className="m-0 flex-1">
-                      <strong>Radiation alert:</strong> {mission.weatherCard.radContext}
-                    </p>
-                  </div>
-                ) : (
-                  <p className="m-0 text-base text-mh-text2">{mission.weatherCard.radContext}</p>
-                )}
-                <p className="m-0 text-base text-mh-text2">{mission.weatherCard.badge}</p>
-              </Card>
+                  {/* 4. Route detail */}
+                  <Card
+                    eyebrow={`Route detail · ${short(rt)}`}
+                    title={rt.name.match(/\(([^)]+)\)/)?.[1] ?? short(rt)}
+                    aside={<SimBadge label="demo model" />}
+                    collapsible
+                  >
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      <Stat tile label="Distance" value={`${m.distanceKm.toFixed(2)} km`} />
+                      <Stat tile label="EVA duration" value={`${m.evaDurationMin} / ${mission.timeWindow.evaMaxMin} min`} />
+                      <Stat tile label="Return buffer" value={`${m.bufferMin} min (min ${mission.timeWindow.returnBufferMin})`} />
+                      <Stat tile label="Back in HAB" value={`${m.endLst} (by ${mission.timeWindow.latestReturn})`} />
+                      <Stat tile label="Max time to shelter" value={`${Math.round(m.maxTimeToShelterMin)} / ${A.sepMinWarningMin} min`} />
+                      <Stat tile label="Not evaluated" value={`${m.neKm.toFixed(2)} km`} />
+                      <Stat tile label="Max slope" value={`${m.maxSlopeDeg.toFixed(1)}° / ${A.slopeLimitDeg}°`} />
+                      <Stat tile label="Data coverage" value={`${rt.dataCoveragePct}%`} />
+                      <Stat tile label="Rover support" value={rt.roverOk ? 'OK' : 'Not possible'} />
+                    </div>
 
-              <Card
-                eyebrow="Traceability"
-                title="Plan versions"
-                icon={GitBranch}
-                aside={<span className="mh-pill mh-pill--info">Active: {mission.activePlanVersion}</span>}
-                collapsible
-              >
-                <ol className="m-0 p-0 list-none flex flex-col gap-2">
-                  {mission.planVersions.map((pv) => {
-                    const isCurrent = mission.activePlanVersion === pv.version;
-                    return (
-                      <li
-                        key={pv.version}
-                        className={`p-4 rounded-mh-md flex flex-col gap-2 ${
-                          isCurrent ? 'bg-mh-fill-blue' : 'bg-mh-fill'
-                        }`}
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="flex flex-col">
-                            <strong className="text-base">Plan {pv.version}</strong>
-                            <span className="font-mono text-[13px] text-mh-text2">{pv.ts}</span>
-                          </span>
-                          {isCurrent ? (
-                            <span className="mh-pill mh-pill--ok">Active on HUD</span>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setMission((prev) => ({
-                                  ...prev,
-                                  activePlanVersion: pv.version,
-                                  selectedRoute: pv.routeId
-                                }));
-                                triggerToast(`Plan ${pv.version} approved & sent to Astronaut HUD`);
-                              }}
-                              className="mh-btn mh-btn--tinted"
-                            >
-                              Send {pv.version}
-                            </button>
-                          )}
+                    {/* Timeline */}
+                    <div className="flex flex-col gap-2">
+                      <span className="mh-eyebrow">
+                        <Clock className="w-4 h-4" aria-hidden="true" />
+                        Timeline (LST)
+                      </span>
+                      <svg viewBox="0 0 300 34" className="w-full h-auto" role="img" aria-label={`EVA from ${m.startLst} to ${m.endLst} LST; dust devil window ${ddStart}–${ddEnd}`}>
+                        <rect x={tx(ddStart)} y="2" width={Math.max(0, tx(ddEnd) - tx(ddStart))} height="18" fill="#E5C04A" opacity="0.25" />
+                        <rect x={tx(m.startLst)} y="8" width={Math.max(2, tx(m.endLst) - tx(m.startLst))} height="6" rx="3" fill={rt.color} />
+                        <line x1={tx(mission.timeWindow.latestReturn)} x2={tx(mission.timeWindow.latestReturn)} y1="0" y2="22" stroke="#E5484D" strokeWidth="1.5" />
+                        {m.stops.filter((s) => s.kind === 'poi').map((s) => (
+                          <circle key={`${s.poiId}-${s.etaMin}`} cx={tx(s.etaLst)} cy="11" r="3" fill="#ffffff" stroke="#2D7FF9" strokeWidth="1.5" />
+                        ))}
+                        <text x={tx(m.startLst)} y="32" fontSize="8" fill="var(--mh-text2)" textAnchor="middle">{m.startLst}</text>
+                        <text x={tx(mission.timeWindow.latestReturn)} y="32" fontSize="8" fill="#E5484D" textAnchor="middle">{mission.timeWindow.latestReturn}</text>
+                        <text x={(tx(ddStart) + tx(ddEnd)) / 2} y="32" fontSize="8" fill="var(--mh-warn)" textAnchor="middle">dust devils</text>
+                      </svg>
+                      <ol className="m-0 p-0 list-none flex flex-col">
+                        {m.stops.map((s, i) => {
+                          const inDust = lstToMin(s.etaLst) >= lstToMin(ddStart) && lstToMin(s.etaLst) <= lstToMin(ddEnd);
+                          return (
+                            <li key={`${s.name}-${i}`} className="flex items-start gap-3 py-1.5 border-b border-mh-sep last:border-b-0">
+                              <span className="font-mono text-[14px] w-12 shrink-0 pt-0.5">{s.etaLst}</span>
+                              <span className="min-w-0 flex-1 flex flex-col">
+                                <span className="text-base font-semibold">{s.name}</span>
+                                <span className="text-[14px] text-mh-text2">
+                                  {s.kind === 'start' && `Egress ${A.egressMin} min · depart ${s.departLst}`}
+                                  {s.kind === 'divert' && 'SEP alert: divert from here'}
+                                  {s.kind === 'poi' && !s.skipped && `Funnel ${A.funnelMinPerPoi} min + sampling · ${s.stationMin} min · depart ${s.departLst}`}
+                                  {s.kind === 'poi' && s.skipped && 'Passed — postponed / not in plan'}
+                                  {s.kind === 'shelter' && 'Shelter waypoint'}
+                                  {s.kind === 'hab' && `Ingress ${A.ingressMin} min · EVA ends ${m.endLst}`}
+                                  {s.kind === 'waypoint' && 'Waypoint'}
+                                  {` · ${s.distKm.toFixed(2)} km`}
+                                </span>
+                              </span>
+                              {inDust && <span className="mh-pill mh-pill--warn !text-[12px] shrink-0">Dust devils</span>}
+                            </li>
+                          );
+                        })}
+                      </ol>
+                    </div>
+
+                    {/* Elevation profile */}
+                    <div className="flex flex-col gap-1">
+                      <span className="mh-eyebrow">Elevation profile</span>
+                      <ElevationProfile
+                        metrics={m}
+                        stops={m.stops}
+                        slopeLimit={A.slopeLimitDeg}
+                        onSegment={(g) => highlightProfileBand(m, g)}
+                      />
+                      <span className="text-[13px] text-mh-text2">
+                        Red: slope &gt; {A.slopeLimitDeg}° · amber: not evaluated · click a band to show it on the map.
+                        Elevation: MOLA trend anchored on PDS waypoint heights; slopes: HiRISE DTM (demo values).
+                      </span>
+                    </div>
+
+                    {/* Metabolic & consumables */}
+                    <div className="flex flex-col gap-2">
+                      <span className="mh-eyebrow">Metabolic &amp; consumables</span>
+                      <div className="grid grid-cols-3 gap-2">
+                        <Stat tile label="Energy" value={`${Math.round(m.energyKJ).toLocaleString('en-US')} kJ`} />
+                        <Stat tile label="Average" value={`${Math.round(m.avgW)} W`} />
+                        <Stat tile label="Peak" value={`${Math.round(m.peakW)} W`} />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <span className="flex flex-wrap justify-between gap-2 text-base">
+                          <span>Suit consumables at EVA end</span>
+                          <strong>
+                            {Math.round(m.consumablesRemainingPct)}% left (reserve {A.suitReservePct}%)
+                          </strong>
+                        </span>
+                        <div className="mh-progress" aria-hidden="true">
+                          <span
+                            style={{
+                              width: `${m.consumablesRemainingPct}%`,
+                              background: m.consumablesRemainingPct < A.suitReservePct ? '#E5484D' : 'var(--mh-ok)'
+                            }}
+                          />
                         </div>
-                        <p className="m-0 text-base">
-                          <span className="text-mh-text2">Trigger:</span> {pv.trigger}
-                        </p>
-                        <p className="m-0 text-base text-mh-text2">{pv.reason}</p>
-                      </li>
-                    );
-                  })}
-                </ol>
+                      </div>
+                    </div>
 
-                <button
-                  type="button"
-                  onClick={() => handleRoleSwitch('astronaut')}
-                  className="mh-btn mh-btn--primary mh-btn--lg mh-btn--block"
-                >
-                  Send daily plan to Astronaut HUD →
-                </button>
-              </Card>
-            </>
-          )}
+                    {/* Dose */}
+                    <div className="flex flex-col gap-2">
+                      <span className="mh-eyebrow">Dose for this EVA</span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {evCrew.map((c) => (
+                          <Stat
+                            key={c.id}
+                            tile
+                            label={`${c.id} · EVA dose → new total`}
+                            value={`${m.doseEvaMsv.toFixed(2)} mSv → ${(c.doseActualMsv + m.doseEvaMsv).toFixed(2)} / ${A.crewSurfaceDoseBudgetMsv} mSv`}
+                          />
+                        ))}
+                      </div>
+                      <span className="text-[13px] text-mh-text2">
+                        {sepAlertActive
+                          ? `SEP rate ${A.doseRateSepUgyH} µGy/h until the shelter, ×${A.stormShelterFactor} after.`
+                          : `Surface rate ${A.doseRateNominalUgyH} µGy/h × EVA time × quality factor ${A.qualityFactor}.`}
+                      </span>
+                    </div>
+
+                    {/* Constraints */}
+                    <div className="flex flex-col gap-2">
+                      <span className="mh-eyebrow">Constraints</span>
+                      <ConstraintTable evaluation={ev} />
+                    </div>
+                  </Card>
+
+                  {/* 5. EVA window & environment */}
+                  <Card eyebrow="Environment" title="EVA window & environment" icon={Radio} collapsible>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Stat tile label={`Sun at start (${m.startLst})`} value={`${sunElevationDeg(m.startLst, A).toFixed(0)}° elevation`} />
+                      <Stat tile label={`Sun at return (${m.endLst})`} value={`${sunElevationDeg(m.endLst, A).toFixed(0)}° elevation`} />
+                      <Stat tile label="Dust opacity τ" value={`${tau.toFixed(2)} (limit ${A.tauVisibilityDegraded})`} />
+                      <Stat tile label="Dust devil window" value={`${ddStart}–${ddEnd} · ${overlapMin} min overlap`} />
+                    </div>
+                    <div
+                      className={`mh-alert ${sepAlertActive ? '!bg-mh-crit-bg !text-mh-crit' : '!bg-mh-ok-bg !text-mh-ok'}`}
+                      role={sepAlertActive ? 'alert' : undefined}
+                    >
+                      {sepAlertActive ? (
+                        <AlertTriangle className="w-5 h-5 shrink-0" aria-hidden="true" />
+                      ) : (
+                        <CheckCircle2 className="w-5 h-5 shrink-0" aria-hidden="true" />
+                      )}
+                      <p className="m-0 flex-1">
+                        <strong>SEP / DONKI:</strong>{' '}
+                        {sepAlertActive
+                          ? `alert — proton flux > 35 pfu, ${A.doseRateSepUgyH} µGy/h at the surface`
+                          : `nominal — ${A.doseRateNominalUgyH} µGy/h at the surface`}
+                      </p>
+                    </div>
+                    <p className="m-0 text-base">{mission.weatherCard.medaContext}</p>
+                    <div className="flex flex-wrap gap-2">
+                      <span className="mh-pill mh-pill--info !text-[13px]">MEDA historical (Sol 455)</span>
+                      <span className="mh-pill mh-pill--info !text-[13px]">DONKI scripted</span>
+                      <SimBadge />
+                    </div>
+                    <p className="m-0 text-[13px] text-mh-text2">
+                      Sun: sin e = sin φ sin δ + cos φ cos δ cos h, φ = {A.latitudeDeg}°, δ = {A.solarDeclinationDeg}° (demo
+                      season, Ls ≈ 30°).
+                    </p>
+                  </Card>
+
+                  {/* 6. Plan versions */}
+                  <Card
+                    eyebrow="Traceability"
+                    title="Plan versions"
+                    icon={GitBranch}
+                    aside={<span className="mh-pill mh-pill--info">Active: {mission.activePlanVersion}</span>}
+                    collapsible
+                  >
+                    <ol className="m-0 p-0 list-none flex flex-col gap-2">
+                      {mission.planVersions.map((pv) => {
+                        const isCurrent = mission.activePlanVersion === pv.version;
+                        return (
+                          <li
+                            key={pv.version}
+                            className={`p-4 rounded-mh-md flex flex-col gap-2 ${isCurrent ? 'bg-mh-fill-blue' : 'bg-mh-fill'}`}
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="flex flex-col">
+                                <strong className="text-base">Plan {pv.version}</strong>
+                                <span className="font-mono text-[13px] text-mh-text2">{pv.ts}</span>
+                              </span>
+                              {isCurrent ? (
+                                <span className="mh-pill mh-pill--ok">Active on HUD</span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setMission((prev) => ({
+                                      ...prev,
+                                      activePlanVersion: pv.version,
+                                      selectedRoute: pv.routeId
+                                    }));
+                                    triggerToast(`Plan ${pv.version} approved & sent to Astronaut HUD`);
+                                  }}
+                                  className="mh-btn mh-btn--tinted"
+                                >
+                                  Send {pv.version}
+                                </button>
+                              )}
+                            </div>
+                            <p className="m-0 text-base">
+                              <span className="text-mh-text2">Trigger:</span> {pv.trigger}
+                            </p>
+                            <div className="flex flex-col gap-0.5">
+                              <span className="font-mono text-[12px] uppercase tracking-[0.08em] text-mh-text2">
+                                What changed
+                              </span>
+                              {(pv.diffItems ?? []).slice(0, 2).map((d) => (
+                                <span key={d} className="text-base">
+                                  {d}
+                                </span>
+                              ))}
+                            </div>
+                            <p className="m-0 text-[14px] text-mh-text2">Approved by {pv.approvedBy}</p>
+                          </li>
+                        );
+                      })}
+                    </ol>
+
+                    <button
+                      type="button"
+                      onClick={() => handleRoleSwitch('astronaut')}
+                      className="mh-btn mh-btn--primary mh-btn--lg mh-btn--block"
+                    >
+                      Send daily plan to Astronaut HUD →
+                    </button>
+                  </Card>
+                </>
+              );
+            })()}
 
           {/* ═══════════════════════════ ROLE 3: ASTRONAUT HUD ═══════════════════════════ */}
           {currentRole === 'astronaut' && (
@@ -4392,16 +4666,12 @@ function ConstraintTable({ evaluation }) {
                     {r.determinant && <span className="text-[12px] text-mh-link">Binding constraint</span>}
                   </span>
                 </td>
-                <td className="!py-2 whitespace-nowrap">
-                  {r.fmt(r.value)} {r.unit !== 'LST' ? r.unit : ''}
-                </td>
+                <td className="!py-2 whitespace-nowrap">{constraintValue(r, r.value)}</td>
                 <td className="!py-2 whitespace-nowrap text-mh-text2">
-                  {r.dir === 'max' ? '≤' : '≥'} {r.fmt(r.limit)} {r.unit !== 'LST' ? r.unit : ''}
+                  {r.id === 'sep' ? '—' : `${r.dir === 'max' ? '≤' : '≥'} ${constraintValue(r, r.limit)}`}
                 </td>
                 <td className="!py-2 whitespace-nowrap">
-                  <span className={`mh-pill ${st.cls} !text-[13px]`}>
-                    {r.id === 'sep' ? st.label : `${r.margin >= 0 ? '+' : '−'}${r.id === 'slope' || r.id === 'notEvaluated' ? Math.abs(r.margin).toFixed(1) : r.id === 'dose' ? Math.abs(r.margin).toFixed(2) : Math.round(Math.abs(r.margin))}${r.unit === 'LST' ? ' min' : ` ${r.unit}`}`}
-                  </span>
+                  <span className={`mh-pill ${st.cls} !text-[13px]`}>{constraintMargin(r)}</span>
                 </td>
               </tr>
             );
