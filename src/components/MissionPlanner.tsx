@@ -249,7 +249,7 @@ const INITIAL_MISSION_V5 = {
   objective: 'Delta Phyllosilicates & Biosignatures',
   selectedRoute: 'A', // 'A' | 'A-MOD' | 'B' | 'SHELTER'
   roverSupport: true,
-  fusionSliderPct: 30, // 0% = Pure Orbital CRISM Prior (±34%), 100% = PDS In-Situ Posterior (±3.8%)
+  fusionSliderPct: 30, // 0% = pure orbital CRISM prior, 100% = in-situ posterior (display weight only)
   timeWindow: {
     suggestedStart: '09:30',
     latestReturn: '14:30',
@@ -722,6 +722,9 @@ const buildPoiPopupHtml = (poi) => {
   const post = poi.pdsInSituPosterior;
   const prior = poi.orbitalPrior;
   const pending = poi.dataConfidence === 'orbital-only';
+  // Same format as <ValueWithUncertainty>: value ± 1σ unit (relative %)
+  const hyd = getHydration(poi);
+  const fmtVS = (v) => `${v.value.toFixed(1)} ± ${v.sigma.toFixed(2)} wt% H₂O (${Math.round(v.relPct)}%)`;
   const row = (k, v) =>
     `<div class="mh-poi-popup__row"><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd></div>`;
   return `
@@ -734,14 +737,17 @@ const buildPoiPopupHtml = (poi) => {
       <dl>
         ${row('Geological unit', poi.feature)}
         ${row('Location', `${poi.lat.toFixed(4)}° N · ${poi.lon.toFixed(4)}° E · MOLA ${poi.elevM} m`)}
-        ${row('Orbital mineralogy (prior)', `${prior.mineral} · ${prior.hydrationEst} · σ ${prior.uncertainty}`)}
+        ${row('Orbital mineralogy (prior)', prior.mineral)}
+        ${hyd.prior ? row('Hydration · orbital prior', `${fmtVS(hyd.prior)} · MRO CRISM 18 m/px · demo value`) : ''}
         ${
           pending
             ? row('In-situ composition', 'Not sampled yet — run the 12-min handheld funnel to replace the orbital prior.')
             : row('Elemental chemistry (PIXL XRF)', post.pixl) +
               row('Mineral phases (SHERLOC Raman)', post.sherloc) +
               row('Texture (SuperCam)', post.supercam) +
-              row('Hydration (posterior)', `${post.hydrationPosterior} · σ ${post.uncertaintyAfter}`)
+              (hyd.posterior
+                ? row('Hydration · in situ', `${fmtVS(hyd.posterior)} · handheld funnel · demo value`)
+                : '')
         }
         ${row('Biosignature potential', post.biosignatureRating)}
       </dl>
@@ -2474,7 +2480,7 @@ export default function MissionPlanner() {
 
     setSelectedPoiId(newPoiId);
     triggerToast(
-      '⚡ 12-Min Handheld Funnel Complete → CRISM Prior Updated to PDS Posterior (±3.5%) & Promoted to POI-4!'
+      '⚡ 12-min handheld funnel complete → orbital estimate replaced by an in-situ measurement · promoted to POI-4'
     );
   };
 
@@ -4371,6 +4377,7 @@ export default function MissionPlanner() {
                       <span className="mh-pill mh-pill--info">
                         Confidence {Math.round(fe.confidence * 100)}%
                       </span>
+                      <SimBadge label="simulated report" />
                     </div>
                     <h3 className="m-0 text-[20px] leading-tight font-bold">{fe.title}</h3>
                     <p className="m-0 text-base">{fe.description}</p>
