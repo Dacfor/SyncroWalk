@@ -252,7 +252,26 @@ const inferOrbitalContext = (lat, lon) => {
 };
 
 // Popup shown when a POI flag is clicked: what a field geologist wants to see
-const buildPoiPopupHtml = (poi, elevM, scheduledSols) => {
+const buildPoiPopupHtml = (poi, elevM, scheduledSols, role = 'scientist') => {
+  // Astronaut: the task card only, no orbital / PDS science layers
+  if (role === 'astronaut') {
+    const rowA = (k, v) => (v ? `<div class="mh-poi-popup__row"><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd></div>` : '');
+    return `
+    <div class="mh-poi-popup">
+      <div class="mh-poi-popup__head">
+        <span class="mh-poi-popup__chip" style="background:${flagColor(poi)}">${escapeHtml(poi.priority ? `${PRIORITY_META[poi.priority].label} priority` : 'No priority yet')}</span>
+        <span class="mh-poi-popup__id">${escapeHtml(poi.id)}</span>
+      </div>
+      <strong class="mh-poi-popup__title">${escapeHtml(poi.name)}</strong>
+      <dl>
+        ${rowA('Location', `${poi.lat.toFixed(4)}° N · ${poi.lon.toFixed(4)}° E · MOLA ${elevM} m`)}
+        ${rowA('Task', poi.infoToCollect)}
+        ${rowA('Samples', poi.samplesRequired ? poi.sampleNotes || 'Required' : 'Not requested')}
+        ${rowA('Instruments', poi.instruments.map(instrumentName).join(', '))}
+        ${rowA('Time on site', `${poi.durationMin} min`)}
+      </dl>
+    </div>`;
+  }
   const color = flagColor(poi);
   const priorityLabel = poi.priority ? `${PRIORITY_META[poi.priority].label} priority` : 'No priority yet';
   const prior = poi.orbitalPrior?.mineral ? poi.orbitalPrior : inferOrbitalContext(poi.lat, poi.lon);
@@ -343,7 +362,12 @@ const L_SHELTERS = ['shelters', 'Shelters & 40-min ring', 'SEP shelters and the 
 const LAYER_TOGGLES = {
   scientist: [L_FUSION, L_THERMAL, L_TRAVERSE, L_UNCERTAINTY, L_REACHABLE],
   control: [L_SLOPE, L_HAZARDS, L_SHELTERS, L_TRAVERSE],
-  astronaut: [L_FUSION, L_SLOPE, L_TRAVERSE]
+  // Astronaut: no science layers (CRISM / mineralogy, Perseverance / PDS). Only what helps on the
+  // ground: high-resolution base, approved route, POIs of the day, hazards, shelters + 40-min ring.
+  astronaut: [
+    ['hazards', 'Hazards', 'Field hazards (boulders, soft soil), slopes above the limit and not-evaluated terrain'],
+    L_SHELTERS
+  ]
 };
 
 const ROLE_FILTER_PRESETS = {
@@ -752,6 +776,8 @@ export default function MissionPlanner() {
   const [pickMode, setPickMode] = useState(false); // scientist: next map click sets the POI position
   const [draftPoint, setDraftPoint] = useState(null); // scientist: position of the POI being defined
   const mapClickRef = useRef(null);
+  const roleRef = useRef('scientist'); // current role for map callbacks registered once
+  roleRef.current = currentRole;
   // Panel chosen in each user's menu (kept when switching user and back)
   const [roleViews, setRoleViews] = useState({ scientist: 'define', control: 'pois', astronaut: 'schedule' });
   const setRoleView = (role) => (view) => setRoleViews((prev) => ({ ...prev, [role]: view }));
@@ -1251,7 +1277,7 @@ export default function MissionPlanner() {
     const hazardGroup = vectorGroupsRef.current.hazards;
     hazardGroup.clearLayers();
 
-    if (activeFilters.topographySlope && currentRole !== 'astronaut') {
+    if (currentRole === 'astronaut' ? activeFilters.hazards : activeFilters.topographySlope) {
       JEZERO_NOT_EVALUATED_ZONES.forEach((nez) => {
         L.rectangle(nez.bounds, {
           color: '#E5C04A',
@@ -1435,7 +1461,9 @@ export default function MissionPlanner() {
         ? (activeFilters.hazards ? planner.state.fieldEvents.filter(isHazard) : []) // operational hazards only
         : currentRole === 'scientist'
           ? planner.state.fieldEvents.filter((fe) => fe.id === shownFeId)
-          : [];
+          : activeFilters.hazards
+            ? planner.state.fieldEvents.filter(isHazard)
+            : [];
     // Compact marker (◆ id); the description (class, e.g. "soft-soil", details) opens in a popup on click
     visibleFieldEvents.forEach((fe) => {
       const meta = FIELD_EVENT_META[fe.class] ?? FIELD_EVENT_META['formation-interest'];
@@ -1774,7 +1802,7 @@ export default function MissionPlanner() {
       autoPanPaddingBottomRight: [72, 24]
     })
       .setLatLng([poi.lat, poi.lon])
-      .setContent(buildPoiPopupHtml(poi, estimateJezeroMolaElevation(poi.lat, poi.lon), sols))
+      .setContent(buildPoiPopupHtml(poi, estimateJezeroMolaElevation(poi.lat, poi.lon), sols, roleRef.current))
       .openOn(map);
   };
 
@@ -1964,7 +1992,7 @@ export default function MissionPlanner() {
               activeFilters={activeFilters}
               routeVisible={mapRouteVisible}
               showDraft={currentRole === 'scientist' && !!draftPoint}
-              showFe={(currentRole === 'control' && activeFilters.hazards && planner.state.fieldEvents.some(isHazard)) || (currentRole === 'scientist' && !!shownFeId)}
+              showFe={(currentRole !== 'scientist' && activeFilters.hazards && planner.state.fieldEvents.some(isHazard)) || (currentRole === 'scientist' && !!shownFeId)}
             />
 
             {pickMode && (
@@ -2028,9 +2056,11 @@ export default function MissionPlanner() {
               <span className="text-base">
                 MOLA <strong>{clickedPoint.molaElevationM} m</strong>
               </span>
-              <span className="text-base text-mh-text2">
-                Sol {clickedPoint.nearestSol} · {clickedPoint.distanceKm.toFixed(2)} km
-              </span>
+              {currentRole !== 'astronaut' && (
+                <span className="text-base text-mh-text2" title="Nearest Perseverance waypoint (PDS)">
+                  M20 Sol {clickedPoint.nearestSol} · {clickedPoint.distanceKm.toFixed(2)} km
+                </span>
+              )}
               {currentRole === 'scientist' && (
                 <button
                   type="button"
@@ -2624,7 +2654,7 @@ function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe
   const notHud = currentRole !== 'astronaut';
   const showFusion = activeFilters.filter1_spectralFusion && notHud;
   const showThermal = activeFilters.filter2_thermalInertia && notHud;
-  const showHazards = activeFilters.topographySlope && notHud;
+  const showHazards = notHud ? activeFilters.topographySlope : activeFilters.hazards;
   const showShelters = isSci ? activeFilters.reachable : activeFilters.shelters;
   const showTraverse = activeFilters.filter3_pdsTargetsTraverse && notHud;
   const composition = isSci ? compositionLayer(activeFilters.composition) : null;
