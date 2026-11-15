@@ -40,7 +40,7 @@ Switching role never reloads the map. Each role sees only the layers and tools i
 
 [![SyncroWalk demo: Sol 58, end of campaign](screenshot/demo.gif)](https://youtu.be/exAY5rXpp4o)
 
-▶️ **[Watch the full 80-second demo on YouTube](https://youtu.be/exAY5rXpp4o)**
+▶️ **[Watch the full 80-second demo on YouTube](https://www.youtube.com/watch?v=7biK_Pcp2FU)**
 
 A hub lab result re-opens a low-priority target, the Sol 59 plan goes NO-GO on crew dose, and SyncroWalk re-plans it with the other EVA pair before the astronauts open their briefing.
 
