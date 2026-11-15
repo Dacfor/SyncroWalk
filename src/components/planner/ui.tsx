@@ -1,4 +1,4 @@
-import type { ComponentType, ReactNode } from 'react';
+import type { ComponentType, KeyboardEvent, ReactNode } from 'react';
 
 // Small Mission Hub layout helpers shared by the three role panels.
 
@@ -125,3 +125,86 @@ export const STATUS_META = {
   changed: { label: 'Changed · not sent', cls: 'mh-pill--warn' },
   sent: { label: 'Sent', cls: 'mh-pill--ok' }
 } as const;
+
+export interface PanelTab<T extends string> {
+  id: T;
+  label: string;
+  icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
+  badge?: ReactNode;
+}
+
+/**
+ * Role menu: chooses which panel (actions / views) is shown in the side column.
+ * Sticky so it stays reachable while the column scrolls. Arrow keys move between tabs.
+ */
+export function PanelTabs<T extends string>({
+  label,
+  tabs,
+  value,
+  onChange
+}: {
+  label: string;
+  tabs: PanelTab<T>[];
+  value: T;
+  onChange: (id: T) => void;
+}) {
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    e.preventDefault();
+    const idx = tabs.findIndex((t) => t.id === value);
+    const next = tabs[(idx + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length];
+    onChange(next.id);
+    document.getElementById(`tab-${next.id}`)?.focus();
+  };
+
+  return (
+    <nav className="lg:sticky lg:top-4 z-20" aria-label={label}>
+      <div
+        role="tablist"
+        aria-label={label}
+        onKeyDown={onKeyDown}
+        className="bg-mh-card rounded-mh-lg shadow-mh p-1.5 grid gap-1"
+        style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}
+      >
+        {tabs.map((t) => {
+          const active = t.id === value;
+          return (
+            <button
+              key={t.id}
+              id={`tab-${t.id}`}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              aria-controls={`tabpanel-${t.id}`}
+              tabIndex={active ? 0 : -1}
+              onClick={() => onChange(t.id)}
+              className={`min-h-14 px-2 py-2 rounded-mh-md border-0 cursor-pointer flex flex-col items-center justify-center gap-1 text-center transition-colors ${
+                active
+                  ? 'bg-mh-primary text-mh-on-primary shadow-mh-btn'
+                  : 'bg-transparent text-mh-text2 hover:bg-mh-fill hover:text-mh-text'
+              }`}
+            >
+              <span className="relative">
+                <t.icon className="w-5 h-5" aria-hidden={true} />
+                {t.badge !== undefined && t.badge !== null && t.badge !== 0 && (
+                  <span className="absolute -top-2 -right-3 min-w-5 h-5 px-1 rounded-full bg-mh-accent text-white font-mono text-xs flex items-center justify-center">
+                    {t.badge}
+                  </span>
+                )}
+              </span>
+              <span className="text-[15px] font-semibold leading-tight">{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
+export function TabPanel({ id, children }: { id: string; children: ReactNode }) {
+  return (
+    <div role="tabpanel" id={`tabpanel-${id}`} aria-labelledby={`tab-${id}`} className="flex flex-col gap-5 sm:gap-6">
+      {children}
+    </div>
+  );
+}

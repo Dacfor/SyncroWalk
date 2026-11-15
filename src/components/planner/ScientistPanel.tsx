@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Crosshair, MapPin, Pencil, PlusCircle, Trash2 } from 'lucide-react';
-import { Card, Label, Segmented } from './ui.tsx';
+import { Crosshair, List, MapPin, MapPinPlus, Pencil, PlusCircle, Trash2 } from 'lucide-react';
+import { Card, Label, PanelTabs, Segmented, TabPanel } from './ui.tsx';
 import { INTEREST_TYPES, PRIORITY_META } from './model.ts';
 import type { Poi } from './model.ts';
 import type { PlannerStore } from './usePlannerStore.ts';
 
 type LatLon = { lat: number; lon: number } | null;
+export type ScientistView = 'define' | 'list';
 
 const EMPTY_FORM = {
   name: '',
@@ -21,6 +22,7 @@ const EMPTY_FORM = {
 /**
  * SCIENTIST — defines points of interest (coordinates typed or picked on the map),
  * their type of interest, the information to collect and whether samples are needed.
+ * Menu: "Add point" (definition form) · "My points" (list, edit, delete).
  */
 export default function ScientistPanel({
   store,
@@ -30,7 +32,9 @@ export default function ScientistPanel({
   setPickMode,
   selectedPoiId,
   onFocusPoi,
-  onToast
+  onToast,
+  view,
+  setView
 }: {
   store: PlannerStore;
   draftPoint: LatLon;
@@ -40,6 +44,8 @@ export default function ScientistPanel({
   selectedPoiId: string | null;
   onFocusPoi: (poi: Poi) => void;
   onToast: (msg: string) => void;
+  view: ScientistView;
+  setView: (v: ScientistView) => void;
 }) {
   const { state } = store;
   const [form, setForm] = useState(EMPTY_FORM);
@@ -50,6 +56,7 @@ export default function ScientistPanel({
   useEffect(() => {
     if (draftPoint) {
       setForm((f) => ({ ...f, lat: draftPoint.lat.toFixed(5), lon: draftPoint.lon.toFixed(5) }));
+      setView('define');
     }
   }, [draftPoint]);
 
@@ -88,6 +95,7 @@ export default function ScientistPanel({
     });
     setDraftPoint({ lat: poi.lat, lon: poi.lon });
     onFocusPoi(poi);
+    setView('define');
   };
 
   const submit = (e: FormEvent) => {
@@ -123,8 +131,22 @@ export default function ScientistPanel({
   const scheduledSols = (poiId: string) =>
     state.missions.filter((m) => m.poiIds.includes(poiId)).map((m) => m.sol).sort((a, b) => a - b);
 
+  const awaiting = state.pois.filter((p) => !p.priority).length;
+
   return (
     <>
+      <PanelTabs
+        label="Scientist menu"
+        value={view}
+        onChange={setView}
+        tabs={[
+          { id: 'define', label: editingId ? 'Edit point' : 'Add point', icon: MapPinPlus },
+          { id: 'list', label: 'My points', icon: List, badge: state.pois.length }
+        ]}
+      />
+
+      {view === 'define' && (
+      <TabPanel id="define">
       <Card
         eyebrow={editingId ? `Editing ${editingId}` : 'New point of interest'}
         title={editingId ? 'Edit point of interest' : 'Define a point of interest'}
@@ -249,14 +271,24 @@ export default function ScientistPanel({
           </div>
         </form>
       </Card>
+      </TabPanel>
+      )}
 
+      {view === 'list' && (
+      <TabPanel id="list">
       <Card
         eyebrow="Science targets"
         title="Your points of interest"
+        subtitle={awaiting > 0 ? `${awaiting} waiting for a priority from mission control.` : 'All points have a priority.'}
         aside={<span className="mh-pill mh-pill--info">{state.pois.length} defined</span>}
       >
         {state.pois.length === 0 && (
-          <p className="m-0 text-base text-mh-text2">No points of interest yet. Add the first one above.</p>
+          <div className="flex flex-col gap-3 items-start">
+            <p className="m-0 text-base text-mh-text2">No points of interest yet.</p>
+            <button type="button" className="mh-btn mh-btn--primary" onClick={() => setView('define')}>
+              <PlusCircle className="w-5 h-5" /> Add the first one
+            </button>
+          </div>
         )}
         <ul className="m-0 p-0 list-none flex flex-col gap-2">
           {state.pois.map((poi) => {
@@ -318,6 +350,8 @@ export default function ScientistPanel({
           })}
         </ul>
       </Card>
+      </TabPanel>
+      )}
     </>
   );
 }

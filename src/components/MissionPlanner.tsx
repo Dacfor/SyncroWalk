@@ -630,6 +630,8 @@ export default function MissionPlanner() {
 
   // 5. Interactive Funnel & UI Drawer States
   const [selectedPoiId, setSelectedPoiId] = useState(null);
+  const [poiLabelId, setPoiLabelId] = useState(null); // POI whose description is open on the map
+  const [mapReady, setMapReady] = useState(false); // Leaflet loads async: re-run the overlay sync once it exists
 
   // 6. Shared mission-planning store (POIs, daily missions) used by all three users
   const planner = usePlannerStore();
@@ -638,6 +640,9 @@ export default function MissionPlanner() {
   const [pickMode, setPickMode] = useState(false); // scientist: next map click sets the POI position
   const [draftPoint, setDraftPoint] = useState(null); // scientist: position of the POI being defined
   const mapClickRef = useRef(null);
+  // Panel chosen in each user's menu (kept when switching user and back)
+  const [roleViews, setRoleViews] = useState({ scientist: 'define', control: 'pois', astronaut: 'schedule' });
+  const setRoleView = (role) => (view) => setRoleViews((prev) => ({ ...prev, [role]: view }));
   const [showEvidenceDrawer, setShowEvidenceDrawer] = useState(false);
   const [showJsonModal, setShowJsonModal] = useState(false);
   const [toastMsg, setToastMsg] = useState(null);
@@ -883,6 +888,7 @@ export default function MissionPlanner() {
       });
 
       mapInstanceRef.current = map;
+      setMapReady(true);
       appendStatus('Jezero L.CRS.EPSG4326 map ready. HiRISE 25 cm/px active at zoom 14–17.');
 
       // 7. Fetch Live Perseverance Traverse & Waypoints from MMGIS (with fallback)
@@ -1213,18 +1219,34 @@ export default function MissionPlanner() {
       const color = poi.priority ? PRIORITY_META[poi.priority].color : 'var(--mh-text2)';
       const sub = poi.priority ? `${PRIORITY_META[poi.priority].label} priority` : 'No priority yet';
       const isSelected = selectedPoiId === poi.id;
-      const html = `
-        <div style="display:flex;align-items:center;gap:8px;background:var(--mh-card);border:2px solid ${isSelected ? 'var(--mh-primary)' : color
-        };padding:4px 12px 4px 4px;border-radius:999px;box-shadow:0 3px 12px rgba(0,0,0,0.35);white-space:nowrap;">
-          <span style="width:26px;height:26px;border-radius:50%;background:${color};color:var(--mh-card);font-family:var(--mh-font-mono);font-weight:500;font-size:13px;display:flex;align-items:center;justify-content:center;">${order ?? '•'}</span>
-          <div>
-            <div style="color:var(--mh-text);font-family:var(--mh-font);font-weight:700;font-size:13px;line-height:1.2;">${poi.id} · ${poi.name.split('(')[0].trim()}</div>
-            <div style="color:var(--mh-text2);font-family:var(--mh-font);font-size:12px;">${sub} · ${poi.interestType}</div>
-          </div>
-        </div>`;
-      const icon = L.divIcon({ className: '', html, iconSize: [230, 40], iconAnchor: [17, 20] });
-      L.marker([poi.lat, poi.lon], { icon, zIndexOffset: isSelected ? 800 : 500 })
-        .on('click', () => setSelectedPoiId(poi.id))
+      const labelOpen = poiLabelId === poi.id;
+      const ring = isSelected ? 'var(--mh-primary)' : '#ffffff';
+      const dot = `<span style="width:26px;height:26px;border-radius:50%;background:${color};color:var(--mh-card);font-family:var(--mh-font-mono);font-weight:500;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${order ?? '•'}</span>`;
+      // Collapsed: just the numbered dot. Clicking it opens the short description.
+      const html = labelOpen
+        ? `<div style="display:flex;align-items:center;gap:8px;background:var(--mh-card);border:2px solid ${ring === '#ffffff' ? color : ring};padding:2px 12px 2px 2px;border-radius:999px;box-shadow:0 3px 12px rgba(0,0,0,0.35);white-space:nowrap;cursor:pointer;">
+            ${dot}
+            <div>
+              <div style="color:var(--mh-text);font-family:var(--mh-font);font-weight:700;font-size:13px;line-height:1.2;">${poi.id} · ${poi.name.split('(')[0].trim()}</div>
+              <div style="color:var(--mh-text2);font-family:var(--mh-font);font-size:12px;">${sub} · ${poi.interestType}</div>
+            </div>
+          </div>`
+        : `<div style="display:inline-flex;border:2px solid ${ring};border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.45);cursor:pointer;">${dot}</div>`;
+      const icon = L.divIcon({
+        className: '',
+        html,
+        iconSize: labelOpen ? [240, 34] : [30, 30],
+        iconAnchor: [15, 15] // dot centre stays on the coordinates in both states
+      });
+      L.marker([poi.lat, poi.lon], {
+        icon,
+        zIndexOffset: labelOpen ? 900 : isSelected ? 800 : 500,
+        title: `${poi.id} — click for details`
+      })
+        .on('click', () => {
+          setPoiLabelId((cur) => (cur === poi.id ? null : poi.id));
+          setSelectedPoiId(poi.id);
+        })
         .addTo(poiGroup);
     });
 
@@ -1240,7 +1262,7 @@ export default function MissionPlanner() {
         .bindTooltip('New point of interest', { permanent: true, direction: 'top', className: 'syncrowalk-tooltip' })
         .addTo(poiGroup);
     }
-  }, [activeFilters, currentRole, mission, rasterOpacities, selectedPoiId, planner.state, selectedMissionId, astronautSol, draftPoint]);
+  }, [activeFilters, currentRole, mission, rasterOpacities, selectedPoiId, poiLabelId, planner.state, selectedMissionId, astronautSol, draftPoint, mapReady]);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // ROLE-SPECIFIC MAP ACTIONS
@@ -1248,6 +1270,7 @@ export default function MissionPlanner() {
   // The Leaflet click listener is registered once, so it calls whatever this ref holds
   useEffect(() => {
     mapClickRef.current = (lat, lon) => {
+      setPoiLabelId(null);
       if (currentRole === 'scientist' && pickMode) {
         setDraftPoint({ lat, lon });
         setPickMode(false);
@@ -1275,7 +1298,7 @@ export default function MissionPlanner() {
       animate: true
     });
     // Only re-frame when the user picks another mission/day, not on every edit
-  }, [currentRole, selectedMissionId, astronautSol]);
+  }, [currentRole, selectedMissionId, astronautSol, mapReady]);
 
   const focusPoi = (poi) => {
     setSelectedPoiId(poi.id);
@@ -1562,6 +1585,8 @@ export default function MissionPlanner() {
               selectedPoiId={selectedPoiId}
               onFocusPoi={focusPoi}
               onToast={triggerToast}
+              view={roleViews.scientist}
+              setView={setRoleView('scientist')}
             />
           )}
           {currentRole === 'control' && (
@@ -1573,6 +1598,8 @@ export default function MissionPlanner() {
               setSelectedMissionId={setSelectedMissionId}
               onFocusPoi={focusPoi}
               onToast={triggerToast}
+              view={roleViews.control}
+              setView={setRoleView('control')}
             />
           )}
           {currentRole === 'astronaut' && (
@@ -1581,6 +1608,8 @@ export default function MissionPlanner() {
               selectedSol={astronautSol}
               setSelectedSol={setAstronautSol}
               onFocusPoi={focusPoi}
+              view={roleViews.astronaut}
+              setView={setRoleView('astronaut')}
             />
           )}
         </aside>

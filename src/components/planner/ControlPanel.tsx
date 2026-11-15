@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ArrowDown, ArrowUp, CalendarDays, MapPin, PlusCircle, Route, Send, Trash2, X } from 'lucide-react';
-import { Card, Chip, Label, Segmented, Stat, STATUS_META } from './ui.tsx';
+import { Card, Chip, Label, PanelTabs, Segmented, Stat, STATUS_META, TabPanel } from './ui.tsx';
 import {
   DAYLIGHT,
   INSTRUMENTS,
@@ -20,10 +20,13 @@ const byPriority = (a: Poi, b: Poi) =>
 
 const DURATIONS = [15, 30, 45, 60, 90, 120];
 
+export type ControlView = 'pois' | 'calendar' | 'route';
+
 /**
  * MISSION CONTROL — prioritises the scientist's points of interest, assigns the
  * instruments for each site, plans one straight-line route per daily mission
  * (always from the astronaut base) and sends the calendar to the astronauts.
+ * Menu: "Points" (priority & instruments) · "Calendar" (daily missions, send) · "Route" (mission editor).
  */
 export default function ControlPanel({
   store,
@@ -32,7 +35,9 @@ export default function ControlPanel({
   selectedMissionId,
   setSelectedMissionId,
   onFocusPoi,
-  onToast
+  onToast,
+  view,
+  setView
 }: {
   store: PlannerStore;
   selectedPoiId: string | null;
@@ -41,6 +46,8 @@ export default function ControlPanel({
   setSelectedMissionId: (id: string | null) => void;
   onFocusPoi: (poi: Poi) => void;
   onToast: (msg: string) => void;
+  view: ControlView;
+  setView: (v: ControlView) => void;
 }) {
   const { state } = store;
   const [customItem, setCustomItem] = useState('');
@@ -57,9 +64,28 @@ export default function ControlPanel({
     setCustomItem('');
   };
 
+  const toPrioritise = pois.filter((p) => !p.priority).length;
+  const openMission = (id: string) => {
+    setSelectedMissionId(id);
+    setView('route');
+  };
+
   return (
     <>
+      <PanelTabs
+        label="Mission control menu"
+        value={view}
+        onChange={setView}
+        tabs={[
+          { id: 'pois', label: 'Points', icon: MapPin, badge: toPrioritise },
+          { id: 'calendar', label: 'Calendar', icon: CalendarDays, badge: pending },
+          { id: 'route', label: mission ? `Route · Sol ${mission.sol}` : 'Route', icon: Route }
+        ]}
+      />
+
       {/* ── 1. Points of interest from the scientist ─────────────────────── */}
+      {view === 'pois' && (
+      <TabPanel id="pois">
       <Card
         eyebrow="From the scientist"
         title="Points of interest"
@@ -171,8 +197,12 @@ export default function ControlPanel({
           })}
         </ul>
       </Card>
+      </TabPanel>
+      )}
 
       {/* ── 2. Calendar of daily missions ───────────────────────────────── */}
+      {view === 'calendar' && (
+      <TabPanel id="calendar">
       <Card
         eyebrow="Schedule"
         title="Daily missions calendar"
@@ -187,8 +217,9 @@ export default function ControlPanel({
               <li key={m.id}>
                 <button
                   type="button"
-                  onClick={() => setSelectedMissionId(sel ? null : m.id)}
-                  aria-pressed={sel}
+                  onClick={() => openMission(m.id)}
+                  aria-current={sel ? 'true' : undefined}
+                  title="Open the route editor" 
                   className={`w-full p-4 rounded-mh-md border-2 text-left cursor-pointer text-mh-text flex flex-col gap-2 ${
                     sel ? 'bg-mh-fill-blue border-mh-primary' : 'bg-mh-fill border-transparent'
                   }`}
@@ -214,7 +245,7 @@ export default function ControlPanel({
           <button
             type="button"
             className="mh-btn mh-btn--tinted"
-            onClick={() => setSelectedMissionId(store.addMission())}
+            onClick={() => openMission(store.addMission())}
           >
             <PlusCircle className="w-5 h-5" /> New daily mission
           </button>
@@ -232,9 +263,29 @@ export default function ControlPanel({
           </button>
         </div>
       </Card>
+      </TabPanel>
+      )}
 
       {/* ── 3. Selected mission editor ──────────────────────────────────── */}
-      {mission && plan && (
+      {view === 'route' && (!mission || !plan) && (
+        <TabPanel id="route">
+          <Card eyebrow="Route editor" title="No mission selected" icon={Route}>
+            <p className="m-0 text-base text-mh-text2">
+              Open a daily mission from the calendar, or create a new one, to plan its route.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="mh-btn mh-btn--tinted" onClick={() => setView('calendar')}>
+                <CalendarDays className="w-5 h-5" /> Open the calendar
+              </button>
+              <button type="button" className="mh-btn mh-btn--primary" onClick={() => openMission(store.addMission())}>
+                <PlusCircle className="w-5 h-5" /> New daily mission
+              </button>
+            </div>
+          </Card>
+        </TabPanel>
+      )}
+      {view === 'route' && mission && plan && (
+        <TabPanel id="route">
         <Card
           eyebrow={`Mission plan · ${STATUS_META[mission.status].label}`}
           title={`Sol ${mission.sol} route`}
@@ -245,7 +296,10 @@ export default function ControlPanel({
               type="button"
               className="mh-btn mh-btn--icon bg-mh-fill text-mh-text"
               aria-label="Close mission editor"
-              onClick={() => setSelectedMissionId(null)}
+              onClick={() => {
+                setSelectedMissionId(null);
+                setView('calendar');
+              }}
             >
               <X className="w-5 h-5" />
             </button>
@@ -441,6 +495,7 @@ export default function ControlPanel({
               if (window.confirm(`Delete the Sol ${mission.sol} mission?`)) {
                 store.deleteMission(mission.id);
                 setSelectedMissionId(null);
+                setView('calendar');
                 onToast(`Sol ${mission.sol} mission deleted`);
               }
             }}
@@ -448,6 +503,7 @@ export default function ControlPanel({
             <Trash2 className="w-5 h-5" /> Delete mission
           </button>
         </Card>
+        </TabPanel>
       )}
     </>
   );
