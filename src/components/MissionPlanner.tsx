@@ -47,6 +47,7 @@ import ControlPanel from './planner/ControlPanel.tsx';
 import AstronautPanel from './planner/AstronautPanel.tsx';
 import { DiscoveryDetail, DiscoveryList } from './planner/Discoveries.tsx';
 import UserMenu from './planner/UserMenu.tsx';
+import EvaBriefing from './planner/Briefing.tsx';
 import { COMPOSITION_LAYERS, CompositionMenu, compositionLayer } from './planner/LayerMenus.tsx';
 import { BASE, FIELD_EVENT_META, PRIORITY_META, SEAT_LABEL, TODAY_SOL, crewAssignment, instrumentName, isHazard, planFor } from './planner/model.ts';
 import {
@@ -789,6 +790,7 @@ export default function MissionPlanner() {
   const [selectedFeId, setSelectedFeId] = useState('FE-024-003'); // discovery selected in list / field map
   const [showFieldMap, setShowFieldMap] = useState(false); // field discoveries window (second map)
   const [showBriefing, setShowBriefing] = useState(false); // astronaut EVA briefing (printable, third map)
+  const [showDebrief, setShowDebrief] = useState(false); // astronaut post-EVA debrief form
   const briefMapContainerRef = useRef(null);
   const [highlightPts, setHighlightPts] = useState(null); // route stretch highlighted from the elevation profile
   const [pendingFe, setPendingFe] = useState(null); // discovery to load into the scientist "Add point" form
@@ -1649,6 +1651,13 @@ export default function MissionPlanner() {
         })
       }).addTo(bmap);
     });
+    // 40-min ring around each shelter + field hazards near the route
+    shelterRings.forEach(({ ring }) => L.polyline([...ring, ring[0]], { color: '#35B17A', weight: 2, dashArray: '8, 6', opacity: 0.9 }).addTo(bmap));
+    planner.state.fieldEvents.filter(isHazard).forEach((fe) =>
+      L.circleMarker([fe.lat, fe.lon], { radius: 6, color: '#1C1C1E', weight: 2, fillColor: (FIELD_EVENT_META[fe.class] ?? FIELD_EVENT_META.boulder).color, fillOpacity: 1 })
+        .bindTooltip(`${fe.id} · ${(FIELD_EVENT_META[fe.class] ?? FIELD_EVENT_META.boulder).label}`, { permanent: true, direction: 'left', className: 'syncrowalk-tooltip' })
+        .addTo(bmap)
+    );
     SHELTERS.forEach((sh) =>
       L.circleMarker([sh.lat, sh.lon], { radius: 6, color: '#ffffff', weight: 2, fillColor: sh.id === 'BASE' ? '#2F6BD8' : '#35B17A', fillOpacity: 1 })
         .bindTooltip(sh.name, { permanent: true, direction: 'right', className: 'syncrowalk-tooltip' })
@@ -2154,217 +2163,19 @@ export default function MissionPlanner() {
         </aside>
       </main>
 
-      {/* ═══════════════════════════════════════════════════════════════════════
-          EVA BRIEFING (Astronaut): sent mission only — printable (window.print)
-         ═══════════════════════════════════════════════════════════════════════ */}
-      {showBriefing &&
-        briefingMission &&
-        (() => {
-          const A = DEMO_ASSUMPTIONS;
-          const plan = planFor(planner.state, briefingMission);
-          const m = plan.metrics;
-          const seated = crewAssignment(planner.state.crew, briefingMission);
-          const evCrew = seated.filter((c) => c.seatNow.startsWith('EV'));
-          const ivCrew = seated.filter((c) => c.seatNow.startsWith('IV'));
-          const iv = ivCrew[0];
-          const poiStops = m.stops.filter((st) => st.kind === 'poi');
-          const lastPoi = poiStops[poiStops.length - 1];
-          const turnBackLst = lastPoi
-            ? addMinutesToLst(TIME_WINDOW.latestReturn, -(TIME_WINDOW.returnBufferMin + (lstToMin(m.endLst) - lstToMin(lastPoi.departLst))))
-            : null;
-          // Comms (demo model): beyond ~0.75 km from the base the ridge blocks the direct link → relay via the rover
-          const basePt = [BASE.lat, BASE.lon];
-          const relays = m.stops
-            .slice(1)
-            .map((st, i) => ({ a: m.stops[i], b: st }))
-            .filter(({ a, b }) => Math.max(distKm([a.lat, a.lon], basePt), distKm([b.lat, b.lon], basePt)) > 0.75);
-          return (
-            <div
-              className="mh-print-overlay fixed inset-0 z-[1200] bg-black/50 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6"
-              onClick={() => setShowBriefing(false)}
-            >
-              <div
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="briefing-title"
-                onClick={(e) => e.stopPropagation()}
-                className="mh-print-root bg-mh-card rounded-mh-lg shadow-mh w-full max-w-[1100px] h-[92vh] flex flex-col overflow-hidden select-text"
-              >
-                <div className="px-5 py-4 flex flex-wrap items-start justify-between gap-3 border-b border-mh-sep shrink-0">
-                  <div className="flex flex-col gap-1 min-w-0">
-                    <span className="mh-eyebrow mh-eyebrow--line">EVA briefing</span>
-                    <h2 id="briefing-title" className="m-0 text-[24px] leading-tight font-bold">
-                      EVA Briefing — Sol {briefingMission.sol}
-                      {briefingMission.sol === TODAY_SOL ? ' (today)' : ''}
-                    </h2>
-                    <p className="m-0 text-base text-mh-text2">
-                      Sent by Mission Control · {plan.evaluation.overall === 'violated' ? 'NO-GO — do not leave the base' : 'GO'}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 mh-no-print">
-                    <button type="button" onClick={() => window.print()} className="mh-btn mh-btn--tinted">
-                      Print
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowBriefing(false)}
-                      className="mh-btn mh-btn--icon bg-mh-fill text-mh-text shrink-0"
-                      aria-label="Close briefing"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="mh-print-scroll flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-5">
-                  {/* Team + objective */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <div className="mh-tile md:col-span-2">
-                      <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">Objective</span>
-                      <strong className="text-[18px]">{MISSION_OBJECTIVE}</strong>
-                      <span className="text-base">
-                        {plan.stops.length} target{plan.stops.length === 1 ? '' : 's'} · {m.distanceKm.toFixed(2)} km · out {m.startLst} → back in base{' '}
-                        {m.endLst} LST
-                      </span>
-                    </div>
-                    <div className="mh-tile">
-                      <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">Team</span>
-                      {evCrew.map((c) => (
-                        <span key={c.id} className="text-base">
-                          <strong>{c.seatNow}</strong> · {c.name}
-                        </span>
-                      ))}
-                      {ivCrew.map((c) => (
-                        <span key={c.id} className="text-base">
-                          <strong>{c.seatNow}</strong> · {c.name} ({SEAT_LABEL[c.seatNow].toLowerCase()})
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Route map: sent route only */}
-                  <div className="rounded-mh-md overflow-hidden border border-mh-sep h-[320px] shrink-0 break-inside-avoid">
-                    <div ref={briefMapContainerRef} className="w-full h-full" />
-                  </div>
-
-                  {/* Hard limits */}
-                  <section className="rounded-mh-md border-2 border-[#E5484D] p-4 flex flex-col gap-2 break-inside-avoid" aria-label="Hard limits">
-                    <span className="mh-eyebrow">Hard limits</span>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                      <Stat label="Turn back by" value={turnBackLst ? `${turnBackLst} LST` : '—'} />
-                      <Stat label="Latest return" value={`${TIME_WINDOW.latestReturn} LST`} />
-                      <Stat label="Minimum buffer" value={`${TIME_WINDOW.returnBufferMin} min`} />
-                      <Stat label="Max time to shelter" value={`${A.sepMinWarningMin} min (route ${Math.round(m.maxTimeToShelterMin)})`} />
-                      <Stat label="Max EVA dose" value={`${A.evaDoseLimitMsv} mSv (plan ${m.doseEvaMsv.toFixed(2)})`} />
-                      <Stat label="Slope limit" value={`${A.slopeLimitDeg}° (route ${m.maxSlopeDeg.toFixed(1)}°)`} />
-                    </div>
-                  </section>
-
-                  {/* Timeline with task / tools / measure / photograph per target */}
-                  <section className="flex flex-col gap-2" aria-label="Timeline">
-                    <span className="mh-eyebrow">Timeline (LST)</span>
-                    <ol className="m-0 p-0 list-none flex flex-col gap-2">
-                      {m.stops.map((st, i) => {
-                        const poi = st.poiId ? planner.state.pois.find((p) => p.id === st.poiId) : null;
-                        const h = poi ? getHydration(poi) : null;
-                        return (
-                          <li key={`${st.name}-${i}`} className="mh-tile !gap-2 break-inside-avoid">
-                            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                              <span className="font-mono text-[16px] font-medium">{st.etaLst}</span>
-                              <strong className="text-base">{st.name}</strong>
-                              {poi && <span className="text-base text-mh-text2">{st.stationMin} min on site · leave {st.departLst}</span>}
-                              {st.kind === 'start' && <span className="text-base text-mh-text2">Egress · leave {st.departLst}</span>}
-                              {st.kind === 'base' && <span className="text-base text-mh-text2">Ingress · EVA ends {m.endLst}</span>}
-                              {st.kind === 'shelter' && <span className="text-base text-mh-text2">Pass by the shelter · no stop planned</span>}
-                            </div>
-                            {poi && (
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <div className="flex flex-col gap-1 text-base">
-                                  <span>
-                                    <strong>Task:</strong> {poi.infoToCollect}
-                                  </span>
-                                  <span>
-                                    <strong>Tools:</strong> {poi.instruments.length ? poi.instruments.map(instrumentName).join(', ') : 'none assigned'}
-                                  </span>
-                                  <span>
-                                    <strong>Samples:</strong> {poi.samplesRequired ? poi.sampleNotes || 'required' : 'none'}
-                                  </span>
-                                  <span>
-                                    <strong>Photograph:</strong> context panorama, work area with scale bar, contacts and textures.
-                                  </span>
-                                </div>
-                                {h?.prior && (
-                                  <ValueWithUncertainty
-                                    label="Measure: hydration (replace the orbital estimate)"
-                                    value={h.prior.value}
-                                    sigma={h.prior.sigma}
-                                    unit="wt% H₂O"
-                                    kind="prior"
-                                    source="MRO · CRISM · 18 m/px"
-                                  />
-                                )}
-                              </div>
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ol>
-                  </section>
-
-                  {/* Material */}
-                  <section className="flex flex-col gap-2 break-inside-avoid" aria-label="Material">
-                    <span className="mh-eyebrow">Material to bring</span>
-                    <ul className="m-0 pl-5 grid grid-cols-1 md:grid-cols-2 gap-1 text-base">
-                      {plan.equipment.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </section>
-
-                  {/* Abort rules */}
-                  <section className="flex flex-col gap-2" aria-label="Abort rules">
-                    <span className="mh-eyebrow">Abort rules</span>
-                    <ul className="m-0 p-0 list-none grid grid-cols-1 md:grid-cols-2 gap-2">
-                      {[
-                        ['SEP alert received?', 'Go to the nearest shelter now (base or delta alcove).'],
-                        [`Dust τ > ${A.tauVisibilityDegraded} or visibility lost?`, 'Return to base.'],
-                        [`Dosimeter above ${A.evaDoseLimitMsv} mSv?`, 'Return to base.'],
-                        [`Suit consumables below ${A.suitReservePct}% reserve?`, 'Return to base.'],
-                        ['Unexpected soft terrain?', 'Stop, probe, use “Report anomaly”.']
-                      ].map(([q, a]) => (
-                        <li key={q} className="mh-tile !gap-0.5">
-                          <span className="text-base font-semibold">{q}</span>
-                          <span className="text-base">
-                            <strong className="text-mh-crit">Yes →</strong> {a}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-
-                  {/* Comms */}
-                  <section className="flex flex-col gap-2" aria-label="Comms">
-                    <span className="mh-eyebrow">
-                      Comms <SimBadge />
-                    </span>
-                    <ul className="m-0 pl-5 flex flex-col gap-1 text-base">
-                      <li>IV {iv?.name} on the base console. Check in at every stop arrival and every 15 min.</li>
-                      {relays.length ? (
-                        relays.map(({ a, b }) => (
-                          <li key={`${a.name}-${b.name}`}>
-                            {a.departLst}–{b.etaLst}: no direct link to the base ({a.name} → {b.name}). Relay via rover.
-                          </li>
-                        ))
-                      ) : (
-                        <li>Direct link to the base along the whole route.</li>
-                      )}
-                    </ul>
-                  </section>
-                </div>
-              </div>
-            </div>
-          );
-        })()}
+      {/* EVA BRIEFING (Astronaut): sent mission only — printable (window.print) */}
+      {showBriefing && briefingMission && (
+        <EvaBriefing
+          state={planner.state}
+          mission={briefingMission}
+          mapRef={briefMapContainerRef}
+          onClose={() => setShowBriefing(false)}
+          onOpenDebrief={() => {
+            setShowBriefing(false);
+            setShowDebrief(true);
+          }}
+        />
+      )}
 
       {/* ═══════════════════════════════════════════════════════════════════════
           FIELD DISCOVERIES WINDOW (Scientist): second map + list + detail
