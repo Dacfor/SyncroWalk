@@ -3,7 +3,8 @@ import type { ReactNode } from 'react';
 import { marsLmst } from './analysis.ts';
 
 // Status bar at the bottom of the page, in the same look as the top navbar (Mission Hub):
-// clocks, sol, scenario, plan version, data links, last update.
+// clocks, sol, scenario, plan version, data links, demo controls (while the scripted demo runs),
+// last update.
 
 export type LinkState = 'ok' | 'degraded' | 'checking' | 'live' | 'built-in';
 
@@ -46,7 +47,8 @@ export default function StatusBar({
   planVerdict,
   trek,
   mmgis,
-  lastUpdate
+  lastUpdate,
+  demo = null
 }: {
   sol: number;
   scenario: string;
@@ -55,6 +57,8 @@ export default function StatusBar({
   trek: LinkState;
   mmgis: LinkState;
   lastUpdate: Date;
+  /** Scripted demo controls, shown right before "Last update" while the demo runs */
+  demo?: ReactNode;
 }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -95,7 +99,9 @@ export default function StatusBar({
         </Item>
         {link('Trek', trek)}
         {link('MMGIS', mmgis)}
-        <Item label="Last update" title="Last change of the shared mission state" last>
+        {/* Demo controls sit right before "Last update", both pushed to the right end */}
+        {demo && <span className="ml-auto inline-flex border-l border-mh-nav-fill">{demo}</span>}
+        <Item label="Last update" title="Last change of the shared mission state" last={!demo}>
           <Value>{hms(lastUpdate)} UTC</Value>
         </Item>
       </div>
