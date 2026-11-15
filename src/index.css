@@ -302,3 +302,27 @@ input[type='range'] {
 .pick-mode .leaflet-interactive {
   cursor: crosshair !important;
 }
+
+/* THEMIS temperature overlay: one cell = one ~100 m THEMIS pixel (no smoothing) */
+.mh-pixelated {
+  image-rendering: pixelated;
+}
+
+/* Horizontal chip rows scroll sideways (arrows + edge fade) instead of wrapping onto several lines */
+.mh-no-scrollbar {
+  scrollbar-width: none;
+}
+.mh-no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Greyscale data layers re-coloured with SVG colormaps (filters defined in MissionPlanner) */
+.mh-cmap-terrain {
+  filter: url(#mh-cmap-terrain);
+}
+.mh-cmap-inferno {
+  filter: url(#mh-cmap-inferno);
+}
+.mh-cmap-cividis {
+  filter: url(#mh-cmap-cividis);
+}

@@ -39,7 +39,18 @@ import {
   Sun,
   Moon,
   SunMoon,
-  ChevronDown
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Thermometer,
+  Gem,
+  Moon as MoonIcon,
+  Mountain,
+  CircleDashed,
+  Footprints,
+  Route,
+  Image as ImageIcon,
+  Wind
 } from 'lucide-react';
 import { usePlannerStore } from './planner/usePlannerStore.ts';
 import ScientistPanel from './planner/ScientistPanel.tsx';
@@ -63,6 +74,16 @@ import {
 } from './planner/analysis.ts';
 import { SimBadge, ValueWithUncertainty, fmtNum } from './planner/analysisUi.tsx';
 import { Stat } from './planner/ui.tsx';
+import LayerCategoryMenu from './planner/LayerMenus.tsx';
+import {
+  TEMPERATURE_STOPS,
+  fetchThemisCatalog,
+  formatLst,
+  kToC,
+  loadThemisCrop,
+  sampleCrop
+} from './planner/themis.ts';
+import { buildEpochs, nearestEpoch, solToDate } from './planner/timeline.ts';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // §1 REAL JEZERO CRATER CONFIGURATION (FROM index_2.html & map_2.py)
@@ -85,12 +106,43 @@ const MOLA_COG_URL =
   'https://asc-pds-services.s3.us-west-2.amazonaws.com/wms_basemaps3/Mars/MOLA/mola128_mola64_merge_90Nto90S_SimpleC_clon0_cog.tif';
 const M20_MMGIS_BASE = 'https://mars.nasa.gov/mmgis-maps/M20/Layers/json/';
 
-// Exact verified NASA Trek WMTS & ArcGIS layers from index_2.html
+// THEMIS night IR colormap (cold → warm), shared by the SVG filter and the legend
+const THERMAL_RDBU_STOPS = ['#2166ac', '#67a9cf', '#f7f7f7', '#ef8a62', '#b2182b'];
+
+// Colour scales for the data layers. Greyscale NASA tiles are re-coloured in the browser with an
+// SVG filter (luminance → contrast stretch over the Jezero values → colour table), so the
+// variation of the data reads as a change of colour. Tiles that NASA already colours keep their
+// own scale; the legend shows the matching bar for every data layer that is on.
+const COLOR_SCALES = {
+  terrain: ['#1a3a6b', '#2c7fb8', '#7fcdbb', '#edf8b1', '#d9a35b', '#8c5a2b', '#f5f5f5'],
+  inferno: ['#000004', '#420a68', '#932667', '#dd513a', '#fca50a', '#fcffa4'],
+  rdbu: THERMAL_RDBU_STOPS,
+  cividis: ['#00204d', '#31446b', '#666970', '#958f78', '#cbba69', '#ffea46'],
+  // NASA products (approximate, for the legend only)
+  nasaRainbow: ['#5000d1', '#2040ff', '#00c0ff', '#40e040', '#ffff00', '#ff8000', '#ff0000'],
+  molaElevation: ['#3b1f8e', '#1f5fd6', '#20b0c8', '#2ca02c', '#d8d020', '#e07020', '#b03020', '#ffffff']
+};
+// SVG colormap filters applied to greyscale tiles (id = mh-cmap-<name>); stretch = linear slope/intercept
+const COLORMAP_FILTERS = [
+  { id: 'mh-thermal-rdbu', stops: COLOR_SCALES.rdbu, slope: 1.5, intercept: -0.25 },
+  // Stretches measured on the tiles around Jezero (2nd–98th percentile of the grey levels):
+  // MOLA DEM 65–117 within ±1.5° (crater rim → delta), THEMIS day 69–167, TES albedo 49–170 within ±3°
+  { id: 'mh-cmap-terrain', stops: COLOR_SCALES.terrain, slope: 4.9, intercept: -1.25 },
+  { id: 'mh-cmap-inferno', stops: COLOR_SCALES.inferno, slope: 2.6, intercept: -0.7 },
+  { id: 'mh-cmap-cividis', stops: COLOR_SCALES.cividis, slope: 2.1, intercept: -0.4 }
+];
+const tableValues = (stops, channel) =>
+  stops.map((h) => (parseInt(h.slice(1 + channel * 2, 3 + channel * 2), 16) / 255).toFixed(3)).join(' ');
+
+// Verified NASA Trek WMTS & ArcGIS layers with tiles over Jezero (checked against each layer's
+// WMTSCapabilities and a test tile). Bottom → top drawing order. `description` is shown in "All layers".
 const JEZERO_RASTER_CATALOG = [
+  // ── Base imagery ──────────────────────────────────────────────────────────
   {
     id: 'viking',
-    group: 'Base Imagery',
-    name: 'Viking MDIM 2.1 Color',
+    group: 'Base imagery',
+    name: 'Viking colour mosaic',
+    description: 'Global colour mosaic from the Viking orbiters (1976–1980). Coarse background that fills the gaps of the sharper mosaics.',
     res: '232 m/px',
     instrument: 'Viking Orbiter / VIS',
     url: trekUrl('Mars_Viking_MDIM21_ClrMosaic_global_232m', 'jpg'),
@@ -99,11 +151,23 @@ const JEZERO_RASTER_CATALOG = [
     coveragePct: 100
   },
   {
+    id: 'mocAtlas',
+    group: 'Base imagery',
+    name: 'MOC global colour atlas',
+    description: 'Global colour atlas from the Mars Orbiter Camera wide-angle cameras (Mars Global Surveyor). Shows the regional colour of the surface.',
+    res: '~7.5 km/px',
+    instrument: 'MGS / MOC',
+    url: trekUrl('msss_atlas_simp_clon', 'png'),
+    maxNative: 6,
+    defaultOpacity: 1.0
+  },
+  {
     id: 'ctxGlobal',
-    group: 'Base Imagery',
-    name: 'CTX Global Mosaic (Beta)',
+    group: 'Base imagery',
+    name: 'CTX global mosaic (beta)',
+    description: 'Seamless greyscale mosaic of Context Camera images (Caltech). Good regional detail around the crater.',
     res: '5 m/px',
-    instrument: 'MRO / CTX (ArcGIS Tile)',
+    instrument: 'MRO / CTX (ArcGIS tiles)',
     url: 'https://astro.arcgis.com/arcgis/rest/services/OnMars/CTX/MapServer/tile/{z}/{y}/{x}',
     tileSize: 512,
     zoomOffset: -1,
@@ -113,9 +177,32 @@ const JEZERO_RASTER_CATALOG = [
     coveragePct: 99
   },
   {
+    id: 'ctxJezPrelim',
+    group: 'Base imagery',
+    name: 'CTX Jezero mosaic (preliminary)',
+    description: 'Block-adjusted CTX mosaic of the wider Jezero / NE Syrtis region, made before landing site selection.',
+    res: '~6 m/px',
+    instrument: 'MRO / CTX',
+    url: trekUrl('Jezero_CTX_BlockAdj_dd', 'png'),
+    maxNative: 12,
+    defaultOpacity: 1.0
+  },
+  {
+    id: 'nesJezMid',
+    group: 'Base imagery',
+    name: 'Jezero · NE Syrtis · Midway visible mosaic',
+    description: 'Preliminary orthoimage mosaic (HiRISE + CTX + HRSC) of the three final Mars 2020 candidate landing sites.',
+    res: 'up to 25 cm/px',
+    instrument: 'MRO HiRISE / CTX + Mars Express HRSC',
+    url: trekUrl('NES_JEZ_MID_Visible_Mosaic_HiRISE_CTX_HRSC_GCS_MARS_07-10-2018', 'png'),
+    maxNative: 17,
+    defaultOpacity: 1.0
+  },
+  {
     id: 'ctxJez',
-    group: 'Base Imagery',
-    name: 'CTX Jezero M2020 Controlled Mosaic',
+    group: 'Base imagery',
+    name: 'CTX Jezero controlled mosaic',
+    description: 'Controlled CTX mosaic of Jezero used onboard Mars 2020 for Terrain-Relative Navigation during landing.',
     res: '6 m/px',
     instrument: 'MRO / CTX SOC_008',
     url: trekUrl('JEZ_ctx_B_soc_008_orthoMosaic_6m_Eqc_latTs0_lon0', 'png'),
@@ -126,8 +213,9 @@ const JEZERO_RASTER_CATALOG = [
   },
   {
     id: 'hiriseJez',
-    group: 'Base Imagery',
-    name: 'HiRISE Jezero M2020 Controlled Mosaic',
+    group: 'Base imagery',
+    name: 'HiRISE Jezero controlled mosaic',
+    description: 'Sharpest view of the crater floor and delta: individual boulders, ripples and outcrops are visible.',
     res: '25 cm/px',
     instrument: 'MRO / HiRISE SOC_006',
     url: trekUrl('JEZ_hirise_soc_006_orthoMosaic_25cm_Eqc_latTs0_lon0_first_dd', 'png'),
@@ -136,21 +224,87 @@ const JEZERO_RASTER_CATALOG = [
     defaultOpacity: 1.0,
     coveragePct: 86
   },
+  // ── Topography ────────────────────────────────────────────────────────────
+  {
+    id: 'molaColor463',
+    group: 'Topography',
+    name: 'MOLA colour elevation',
+    description: 'Laser-altimeter elevation, colour-coded (blue low → red/white high) with hillshade. Shows the crater rim and the delta relief.',
+    res: '463 m/px',
+    instrument: 'MGS / MOLA',
+    url: trekUrl('Mars_MGS_MOLA_ClrShade_merge_global_463m', 'jpg'),
+    maxNative: 7,
+    defaultOpacity: 0.65,
+    colorScale: { stops: COLOR_SCALES.molaElevation, low: 'Low elevation', high: 'High elevation', source: 'NASA scale' }
+  },
+  {
+    id: 'molaDem',
+    group: 'Topography',
+    name: 'MOLA elevation (DEM)',
+    description: 'Raw elevation model in greyscale: brighter means higher. Useful to read relative heights without hillshading.',
+    res: '~460 m/px',
+    instrument: 'MGS / MOLA',
+    url: trekUrl('mola128_mola64_merge_90Nto90S_SimpleC_clon0', 'png'),
+    maxNative: 5,
+    defaultOpacity: 0.65,
+    className: 'mh-cmap-terrain',
+    colorScale: { stops: COLOR_SCALES.terrain, low: 'Low elevation', high: 'High elevation' }
+  },
   {
     id: 'molaHrsc',
-    group: 'Topography & DEM',
-    name: 'MOLA + HRSC Color Hillshade',
+    group: 'Topography',
+    name: 'Slopes & hazards (MOLA + HRSC)',
+    description: 'MOLA + HRSC terrain coloured by elevation and shaded, plus slopes above 15° (red) and terrain not evaluated from orbit (amber).',
     res: '200 m/px',
-    instrument: 'MGS/MOLA + Mars Express/HRSC',
+    instrument: 'MGS / MOLA + Mars Express / HRSC',
     url: trekUrl('Mars_MOLA_blend200ppx_HRSC_ClrShade_clon0dd_200mpp_lzw', 'jpg'),
     maxNative: 8,
     defaultOpacity: 0.6,
-    coveragePct: 100
+    coveragePct: 100,
+    colorScale: { stops: COLOR_SCALES.molaElevation, low: 'Low elevation', high: 'High elevation', source: 'NASA scale' }
+  },
+  {
+    id: 'molaHrscShade',
+    group: 'Topography',
+    name: 'MOLA + HRSC hillshade',
+    description: 'Greyscale shaded relief of the same MOLA + HRSC terrain: ridges, scarps and channels stand out.',
+    res: '200 m/px',
+    instrument: 'MGS / MOLA + Mars Express / HRSC',
+    url: trekUrl('Mars_MOLA_blend200ppx_HRSC_Shade_clon0dd_200mpp_lzw', 'jpg'),
+    maxNative: 8,
+    defaultOpacity: 0.6
+  },
+  {
+    id: 'molaRoughness',
+    group: 'Topography',
+    name: 'MOLA surface roughness',
+    description: 'How rough the ground is at hundred-metre scale, from the spread of the laser returns. Rough terrain is harder to cross on foot.',
+    res: '~7.5 km/px',
+    instrument: 'MGS / MOLA',
+    url: trekUrl('mola_roughness', 'png'),
+    maxNative: 1,
+    defaultOpacity: 0.6,
+    colorScale: { note: 'NASA colour composite: each colour channel is the roughness at a different baseline (grey = uniform).' }
+  },
+  // ── Thermal ───────────────────────────────────────────────────────────────
+  {
+    id: 'themisDay',
+    group: 'Thermal & temperature',
+    name: 'THEMIS daytime infrared',
+    description: 'Daytime thermal-infrared mosaic: brightness mostly follows slopes facing the Sun and surface texture. Relative scale, not °C.',
+    res: '100 m/px',
+    instrument: 'Mars Odyssey / THEMIS IR',
+    url: trekUrl('THEMIS_DayIR_ControlledMosaics_100m_v2_oct2018', 'png'),
+    maxNative: 9,
+    defaultOpacity: 0.65,
+    className: 'mh-cmap-inferno',
+    colorScale: { stops: COLOR_SCALES.inferno, low: 'Cooler (shaded, dusty)', high: 'Warmer (sun-facing, rocky)' }
   },
   {
     id: 'themisNight',
-    group: 'Thermal Inertia',
-    name: 'THEMIS Night IR (Thermal Inertia)',
+    group: 'Thermal & temperature',
+    name: 'THEMIS night infrared (thermal inertia)',
+    description: 'Night-time thermal-infrared mosaic in a red–blue scale: warm = bedrock that keeps heat, cold = loose sand and dust. Relative scale.',
     res: '100 m/px',
     instrument: 'Mars Odyssey / THEMIS IR',
     url: trekUrl('THEMIS_NightIR_ControlledMosaics_100m_v2_oct2018', 'png'),
@@ -158,42 +312,109 @@ const JEZERO_RASTER_CATALOG = [
     defaultOpacity: 0.65,
     coveragePct: 95,
     // Grayscale night IR re-coloured with a red–blue (RdBu) SVG filter, see THERMAL_RDBU_STOPS
-    className: 'mh-thermal-rdbu'
+    className: 'mh-thermal-rdbu',
+    colorScale: { stops: COLOR_SCALES.rdbu, low: 'Cold · sand / dust', high: 'Warm · bedrock' }
   },
   {
+    id: 'tesThermalInertia',
+    group: 'Thermal & temperature',
+    name: 'TES thermal inertia',
+    description: 'How well the surface stores heat, derived from TES temperatures: high = rock or crust, low = fine dust or sand.',
+    res: '~3 km/px',
+    instrument: 'MGS / TES',
+    url: trekUrl('TES_Thermal_Inertia', 'png'),
+    maxNative: 1,
+    defaultOpacity: 0.6,
+    colorScale: { stops: COLOR_SCALES.nasaRainbow, low: 'Low inertia (dust)', high: 'High inertia (rock)', source: 'NASA scale' }
+  },
+  // ── Composition ───────────────────────────────────────────────────────────
+  {
     id: 'tesClay',
-    group: 'Spectral Prior (Orbital)',
-    name: 'TES Phyllosilicates / High-Si Glass',
-    res: '~7 km/px (Prior)',
-    instrument: 'MGS / TES + MRO / CRISM Prior',
+    group: 'Composition (orbital spectra)',
+    name: 'Mineralogy fusion (CRISM prior ↔ PDS in situ)',
+    description: 'Orbital mineral zones (CRISM prior, dashed) and rings measured in situ by PIXL/SHERLOC (posterior), over the TES map of clay-like sheet silicates / silica-rich glass — a regional hint of water alteration.',
+    res: '~7 km/px (prior)',
+    instrument: 'MGS / TES',
     url: trekUrl('TES_Glass_Clay', 'png'),
     maxNative: 1,
     defaultOpacity: 0.5,
-    coveragePct: 92
+    coveragePct: 92,
+    colorScale: { stops: COLOR_SCALES.nasaRainbow, low: 'Less clay / glass', high: 'More clay / glass', source: 'NASA scale' }
   },
   {
     id: 'tesCpx',
-    group: 'Spectral Prior (Orbital)',
-    name: 'TES High-Ca Clinopyroxene',
-    res: '~7 km/px (Prior)',
-    instrument: 'MGS / TES Spectral',
+    group: 'Composition (orbital spectra)',
+    name: 'TES high-Ca pyroxene',
+    description: 'Abundance of high-calcium pyroxene, a mineral of basaltic (volcanic) rocks.',
+    res: '~7 km/px (prior)',
+    instrument: 'MGS / TES',
     url: trekUrl('TES_Clinopyroxene', 'png'),
     maxNative: 1,
     defaultOpacity: 0.5,
-    coveragePct: 92
+    coveragePct: 92,
+    colorScale: { stops: COLOR_SCALES.nasaRainbow, low: 'Less pyroxene', high: 'More pyroxene', source: 'NASA scale' }
   },
   {
-    id: 'tesDust',
-    group: 'Atmosphere & Dust',
-    name: 'TES Dust Cover Index',
+    id: 'tesPlagioclase',
+    group: 'Composition (orbital spectra)',
+    name: 'TES plagioclase',
+    description: 'Abundance of plagioclase feldspar, the other main mineral of basalt.',
     res: '~7 km/px',
-    instrument: 'MGS / TES + M20 / MEDA Context',
-    url: trekUrl('tes_ruffdust', 'png'),
+    instrument: 'MGS / TES',
+    url: trekUrl('TES_Plagioclase', 'png'),
     maxNative: 1,
     defaultOpacity: 0.5,
-    coveragePct: 100
+    colorScale: { stops: COLOR_SCALES.nasaRainbow, low: 'Less plagioclase', high: 'More plagioclase', source: 'NASA scale' }
+  },
+  {
+    id: 'tesAlbedo',
+    group: 'Composition (orbital spectra)',
+    name: 'TES surface albedo',
+    description: 'How much sunlight the surface reflects: bright areas are usually dusty, dark areas are sand or rock.',
+    res: '7.4 km/px',
+    instrument: 'MGS / TES',
+    url: trekUrl('Mars_MGS_TES_Albedo_mosaic_global_7410m', 'png'),
+    maxNative: 1,
+    defaultOpacity: 0.5,
+    className: 'mh-cmap-cividis',
+    colorScale: { stops: COLOR_SCALES.cividis, low: 'Dark (sand, rock)', high: 'Bright (dust)' }
+  },
+  // ── Atmosphere & dust ─────────────────────────────────────────────────────
+  {
+    id: 'tesDust',
+    group: 'Atmosphere & dust',
+    name: 'TES dust cover index',
+    description: 'Spectral index of how much fine dust covers the surface: dusty ground hides the rocks below and coats instruments.',
+    res: '~7 km/px',
+    instrument: 'MGS / TES',
+    url: trekUrl('tes_ruffdust', 'png'),
+    maxNative: 2,
+    defaultOpacity: 0.5,
+    coveragePct: 100,
+    colorScale: { note: 'NASA colour scale of the dust cover index (low index = dusty surface).' }
+  },
+  {
+    id: 'tesDustCover',
+    group: 'Atmosphere & dust',
+    name: 'TES global dust',
+    description: 'Global map of surface dust from TES spectra, a coarser view of the same property.',
+    res: '~7 km/px',
+    instrument: 'MGS / TES',
+    url: trekUrl('TES_Dust', 'png'),
+    maxNative: 1,
+    defaultOpacity: 0.5,
+    colorScale: { stops: COLOR_SCALES.nasaRainbow, low: 'Less dust', high: 'More dust', source: 'NASA scale' }
   }
 ];
+
+// Layers that are also driven by the role toggles in the Layers bar
+const ROLE_LAYER_FILTER = {
+  tesClay: 'filter1_spectralFusion',
+  themisNight: 'filter2_thermalInertia',
+  molaHrsc: 'topographySlope',
+  tesDust: 'atmosphereMeda'
+};
+const BASE_DEFAULT_ON = new Set(['viking', 'ctxGlobal', 'ctxJez', 'hiriseJez']);
 
 // Built-in fallback Perseverance traverse & Sol waypoints (Octavia E. Butler -> Séítah -> Three Forks -> Delta)
 // Used immediately while MMGIS JSON loads or if offline
@@ -210,8 +431,6 @@ const FALLBACK_M20_WAYPOINTS = [
   { sol: 540, name: 'Yori Pass / Enchanted Lake', lat: 18.4485, lon: 77.4442, elev: -2535 }
 ];
 
-// THEMIS night IR colormap (cold → warm), shared by the SVG filter and the legend
-const THERMAL_RDBU_STOPS = ['#2166ac', '#67a9cf', '#f7f7f7', '#ef8a62', '#b2182b'];
 
 // POI flag colours by priority (fixed hex: must stay legible over Mars imagery)
 const POI_FLAG_COLORS = {
@@ -775,6 +994,98 @@ export default function MissionPlanner() {
   const [selectedFeId, setSelectedFeId] = useState('FE-024-003'); // discovery selected in list / field map
   const [showFieldMap, setShowFieldMap] = useState(false); // field discoveries window (second map)
   const [showBriefing, setShowBriefing] = useState(false); // astronaut EVA briefing (printable, third map)
+
+  // Layers: user choices from "All layers" (role-driven layers follow activeFilters instead)
+  const [layerOverrides, setLayerOverrides] = useState({});
+  const [themisTempOn, setThemisTempOn] = useState(false); // THEMIS brightness temperature (time series)
+
+  // Timeline: THEMIS observations (ODE API) + Perseverance waypoints → dates with data
+  const [themisCatalog, setThemisCatalog] = useState([]);
+  const [themisCatalogError, setThemisCatalogError] = useState(null);
+  const [m20Waypoints, setM20Waypoints] = useState(FALLBACK_M20_WAYPOINTS);
+  const [epochIdx, setEpochIdx] = useState(null); // null = latest date
+  const [themisCrop, setThemisCrop] = useState(null);
+  const [themisLoading, setThemisLoading] = useState(false);
+  const [themisError, setThemisError] = useState(null);
+  const [tempHover, setTempHover] = useState(null); // { k, lat, lon }
+  const themisOverlayRef = useRef(null);
+  const themisCacheRef = useRef(new Map());
+  // Dates with time-stamped data and the one selected on the timeline
+  // Map bar: one drop-down per data category, built from the layer catalogue
+  const catalogItems = (group) =>
+    JEZERO_RASTER_CATALOG.filter((c) => c.group === group).map((c) => ({
+      id: c.id,
+      name: c.name,
+      description: c.description,
+      instrument: c.instrument,
+      res: c.res,
+      on: isLayerOn(c.id)
+    }));
+  const layerCategories = [
+    { label: 'Imagery', icon: ImageIcon, items: catalogItems('Base imagery') },
+    { label: 'Topography', icon: Mountain, items: catalogItems('Topography') },
+    {
+      label: 'Thermal',
+      icon: Thermometer,
+      items: [
+        ...catalogItems('Thermal & temperature'),
+        {
+          id: 'themisTemp',
+          name: 'Surface temperature (THEMIS, real values)',
+          description:
+            'Calibrated surface temperature in Kelvin from single THEMIS passes, blue (cold) → red (warm). Each date shows only the observation taken that day; hover the map to read °C.',
+          instrument: `Mars Odyssey / THEMIS IR · ${themisCatalog.length} observations`,
+          res: '~100 m/px',
+          on: themisTempOn,
+          timeSeries: true
+        }
+      ]
+    },
+    { label: 'Composition', icon: Gem, items: catalogItems('Composition (orbital spectra)') },
+    { label: 'Dust', icon: Wind, items: catalogItems('Atmosphere & dust') },
+    {
+      label: 'Rover',
+      icon: Route,
+      items: [
+        {
+          id: 'm20Traverse',
+          name: 'Perseverance position',
+          description: 'Where the rover was on the date selected on the timeline, and the drive that took it there (MMGIS / PDS waypoints).',
+          instrument: 'Mars 2020 / Perseverance',
+          on: !!activeFilters.filter3_pdsTargetsTraverse,
+          timeSeries: true
+        }
+      ]
+    },
+    ...(currentRole === 'scientist'
+      ? [
+          {
+            label: 'Analysis',
+            icon: CircleDashed,
+            items: [
+              {
+                id: 'uncertainty',
+                name: 'Uncertainty (1σ)',
+                description:
+                  'How certain the orbital mineralogy is: a dense grey veil = uncertain estimate; tight green rings = in-situ measurements.',
+                on: !!activeFilters.uncertainty
+              },
+              {
+                id: 'reachable',
+                name: 'Reachable area',
+                description: 'Area within a 40-min walk of a shelter: what an EVA can reach under the SEP rule (demo model).',
+                on: !!activeFilters.reachable
+              }
+            ]
+          }
+        ]
+      : [])
+  ];
+
+  const epochs = useMemo(() => buildEpochs(themisCatalog, m20Waypoints), [themisCatalog, m20Waypoints]);
+  const epochIndex = epochs.length ? Math.min(epochIdx ?? epochs.length - 1, epochs.length - 1) : -1;
+  const epoch = epochIndex >= 0 ? epochs[epochIndex] : null;
+  const themisObs = themisTempOn ? epoch?.themis?.[0] ?? null : null;
   const briefMapContainerRef = useRef(null);
   const [highlightPts, setHighlightPts] = useState(null); // route stretch highlighted from the elevation profile
   const [pendingFe, setPendingFe] = useState(null); // discovery to load into the scientist "Add point" form
@@ -975,11 +1286,7 @@ export default function MissionPlanner() {
         tileLayersRef.current[cfg.id] = createRasterLayer(L, cfg, 10 + idx);
       });
 
-      // Base imagery layers on by default
-      tileLayersRef.current.viking.addTo(map);
-      tileLayersRef.current.ctxGlobal.addTo(map);
-      tileLayersRef.current.ctxJez.addTo(map);
-      tileLayersRef.current.hiriseJez.addTo(map);
+      // Base imagery (on by default) is added by the layer sync effect below
 
       // 5. Initialize Vector Layer Groups
       vectorGroupsRef.current.fusionPrior = L.layerGroup().addTo(map);
@@ -1046,6 +1353,7 @@ export default function MissionPlanner() {
               lat: f.geometry.coordinates[1],
               elev: f.properties?.elev_geoid ?? -2550
             }));
+            setM20Waypoints(waypointsRef.current);
           }
           if (vectorGroupsRef.current.traverse) {
             L.geoJSON(travJson, {
@@ -1093,37 +1401,8 @@ export default function MissionPlanner() {
       }
     };
 
-    // High-res base imagery always on; in HUD mode we keep ONLY clean HiRISE + CTX
-    syncTile('hiriseJez', true, rasterOpacities.hiriseJez);
-    syncTile('ctxJez', true, rasterOpacities.ctxJez);
-
-    // Role Filter 1 (Scientist): Spectral Prior & CRISM/PDS Fusion
-    syncTile(
-      'tesClay',
-      activeFilters.filter1_spectralFusion && currentRole !== 'astronaut',
-      rasterOpacities.tesClay
-    );
-
-    // Role Filter 2 (Scientist): Thermal Inertia (THEMIS Night IR)
-    syncTile(
-      'themisNight',
-      activeFilters.filter2_thermalInertia && currentRole !== 'astronaut',
-      rasterOpacities.themisNight
-    );
-
-    // Role Filter 1 (Mission Control): MOLA + HRSC Topography & Slope
-    syncTile(
-      'molaHrsc',
-      activeFilters.topographySlope && currentRole !== 'astronaut',
-      rasterOpacities.molaHrsc
-    );
-
-    // Role Filter 2 (Mission Control): TES Dust & MEDA Context
-    syncTile(
-      'tesDust',
-      activeFilters.atmosphereMeda && currentRole !== 'astronaut',
-      rasterOpacities.tesDust
-    );
+    // Every catalog layer: role-driven ones follow the Layers bar, the others "All layers"
+    JEZERO_RASTER_CATALOG.forEach((cfg) => syncTile(cfg.id, isLayerOn(cfg.id), rasterOpacities[cfg.id] ?? cfg.defaultOpacity));
 
     // 2. Render CRISM Orbital Prior vs. PDS In-Situ Posterior Fusion Polygons
     const priorGroup = vectorGroupsRef.current.fusionPrior;
@@ -1323,33 +1602,28 @@ export default function MissionPlanner() {
         .addTo(analysisGroup);
     }
 
-    // 4. Render Perseverance Reference Traverse & Waypoints
+    // 4. Perseverance (time series): only the rover position on the selected date and the
+    //    leg it drove to get there — no mixing with other years.
     const travGroup = vectorGroupsRef.current.traverse;
     travGroup.clearLayers();
-    if (activeFilters.filter3_pdsTargetsTraverse && currentRole !== 'astronaut') {
-      const fallbackLatLngs = FALLBACK_M20_WAYPOINTS.map((w) => [w.lat, w.lon]);
-      L.polyline(fallbackLatLngs, {
-        color: '#FF6B35',
-        weight: 2.5,
-        dashArray: '4, 4',
-        opacity: 0.85
-      })
-        .bindTooltip('Mars 2020 Perseverance Traverse [MMGIS / PDS]', { sticky: true })
-        .addTo(travGroup);
-
-      FALLBACK_M20_WAYPOINTS.forEach((wp) => {
-        L.circleMarker([wp.lat, wp.lon], {
-          radius: 4,
-          color: '#ffd166',
-          weight: 1.5,
-          fillColor: '#0b0f14',
-          fillOpacity: 0.9
-        })
-          .bindTooltip(`Perseverance Sol ${wp.sol}: ${wp.name} (${wp.elev}m)`, {
-            direction: 'top'
-          })
+    if (activeFilters.filter3_pdsTargetsTraverse && epoch?.rover) {
+      const wp = epoch.rover;
+      const sorted = [...m20Waypoints].sort((a, b) => a.sol - b.sol);
+      const prev = [...sorted].reverse().find((w) => w.sol < wp.sol);
+      if (prev) {
+        L.polyline(
+          [
+            [prev.lat, prev.lon],
+            [wp.lat, wp.lon]
+          ],
+          { color: '#FF6B35', weight: 3, dashArray: '4, 4', opacity: 0.9 }
+        )
+          .bindTooltip(`Perseverance drive: Sol ${prev.sol} → Sol ${wp.sol}`, { sticky: true })
           .addTo(travGroup);
-      });
+      }
+      L.circleMarker([wp.lat, wp.lon], { radius: 8, color: '#ffffff', weight: 3, fillColor: '#FF6B35', fillOpacity: 1 })
+        .bindTooltip(`Perseverance · Sol ${wp.sol} (${epoch.date}) · ${wp.name}`, { direction: 'top' })
+        .addTo(travGroup);
     }
 
     // 5. Daily mission route: straight segments base → stops → base, plus the base marker
@@ -1451,7 +1725,7 @@ export default function MissionPlanner() {
         .bindTooltip('New point of interest', { permanent: true, direction: 'top', className: 'syncrowalk-tooltip' })
         .addTo(poiGroup);
     }
-  }, [activeFilters, currentRole, mission, rasterOpacities, selectedPoiId, planner.state, selectedMissionId, astronautSol, draftPoint, mapReady, shownFeId, highlightPts, shelterRings]);
+  }, [activeFilters, currentRole, mission, rasterOpacities, selectedPoiId, planner.state, selectedMissionId, astronautSol, draftPoint, mapReady, shownFeId, highlightPts, shelterRings, layerOverrides, epoch]);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // FIELD DISCOVERIES MAP (Scientist): a second, independent Leaflet map that lives
@@ -1550,6 +1824,113 @@ export default function MissionPlanner() {
         .addTo(group);
     });
   }, [showFieldMap, planner.state.fieldEvents, planner.state.pois, selectedFeId]);
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // LAYERS & TIMELINE
+  // ═══════════════════════════════════════════════════════════════════════════
+  function isLayerOn(id) {
+    if (ROLE_LAYER_FILTER[id]) return !!activeFilters[ROLE_LAYER_FILTER[id]];
+    return layerOverrides[id] ?? BASE_DEFAULT_ON.has(id);
+  }
+  const toggleLayer = (id) => {
+    if (id === 'themisTemp') return toggleThemisTemp();
+    if (id === 'm20Traverse') return handleToggleRoleFilter('filter3_pdsTargetsTraverse');
+    if (id === 'uncertainty' || id === 'reachable') return handleToggleRoleFilter(id);
+    if (ROLE_LAYER_FILTER[id]) return handleToggleRoleFilter(ROLE_LAYER_FILTER[id]);
+    setLayerOverrides((prev) => ({ ...prev, [id]: !isLayerOn(id) }));
+  };
+
+
+  function toggleThemisTemp() {
+    const next = !themisTempOn;
+    setThemisTempOn(next);
+    // Jump to the nearest date with a THEMIS observation if the current one has none
+    if (next && epoch && !epoch.themis.length) {
+      const k = nearestEpoch(epochs, epoch.time, (e) => e.themis.length > 0);
+      if (k >= 0) {
+        setEpochIdx(k);
+        triggerToast(`Timeline moved to ${epochs[k].date}: the closest THEMIS observation.`);
+      }
+    }
+  }
+
+  // THEMIS catalogue (ODE REST API, CORS-enabled) — once
+  useEffect(() => {
+    const ctrl = new AbortController();
+    fetchThemisCatalog(ctrl.signal)
+      .then(setThemisCatalog)
+      .catch((e) => e.name !== 'AbortError' && setThemisCatalogError(String(e.message || e)));
+    return () => ctrl.abort();
+  }, []);
+
+  // THEMIS observation of the selected date → crop over Jezero (through the Vite proxy)
+  useEffect(() => {
+    setThemisError(null);
+    if (!themisObs) {
+      setThemisCrop(null);
+      return;
+    }
+    const cached = themisCacheRef.current.get(themisObs.id);
+    if (cached) {
+      setThemisCrop(cached);
+      return;
+    }
+    const ctrl = new AbortController();
+    setThemisLoading(true);
+    loadThemisCrop(themisObs, ctrl.signal)
+      .then((crop) => {
+        themisCacheRef.current.set(themisObs.id, crop);
+        setThemisCrop(crop);
+      })
+      .catch((e) => {
+        if (e.name === 'AbortError') return;
+        setThemisCrop(null);
+        setThemisError(
+          /404|Failed to fetch|NetworkError|Unexpected THEMIS label/.test(String(e.message))
+            ? `${e.message}. The THEMIS files are read through the Vite proxy: run the app with "npm run dev" or "npm run preview".`
+            : String(e.message || e)
+        );
+      })
+      .finally(() => setThemisLoading(false));
+    return () => ctrl.abort();
+  }, [themisObs?.id]);
+
+  // Draw / remove the temperature image overlay
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    const L = window.L;
+    if (themisOverlayRef.current) {
+      themisOverlayRef.current.remove();
+      themisOverlayRef.current = null;
+    }
+    if (!map || !L || !themisCrop || !themisTempOn) return;
+    themisOverlayRef.current = L.imageOverlay(themisCrop.dataUrl, themisCrop.bounds, {
+      opacity: 0.85,
+      className: 'mh-pixelated',
+      interactive: false,
+      zIndex: 350
+    }).addTo(map);
+  }, [themisCrop, themisTempOn, mapReady]);
+
+  // Temperature under the mouse
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !themisCrop || !themisTempOn) {
+      setTempHover(null);
+      return;
+    }
+    const onMove = (e) => {
+      const k = sampleCrop(themisCrop, e.latlng.lat, e.latlng.lng);
+      setTempHover(Number.isNaN(k) ? null : { k, lat: e.latlng.lat, lon: e.latlng.lng });
+    };
+    const onOut = () => setTempHover(null);
+    map.on('mousemove', onMove);
+    map.on('mouseout', onOut);
+    return () => {
+      map.off('mousemove', onMove);
+      map.off('mouseout', onOut);
+    };
+  }, [themisCrop, themisTempOn, mapReady]);
 
   // Mission shown in the astronaut briefing: the one sent for the selected Sol
   const briefingMission = planner.state.missions.find((m) => m.sol === astronautSol && m.status !== 'draft') ?? null;
@@ -1861,69 +2242,89 @@ export default function MissionPlanner() {
           }`}
           aria-label="Jezero map"
         >
-          {/* Map header: one compact row of layer toggles → more room for the map */}
-          <div className="px-5 py-3 flex flex-wrap items-center gap-2 border-b border-mh-sep shrink-0">
-            <span className="mh-eyebrow mr-1">Layers</span>
-            <FilterToggle
-              on={activeFilters.filter1_spectralFusion}
-              onClick={() => handleToggleRoleFilter('filter1_spectralFusion')}
-              hint="Orbital CRISM/TES mineral zones (prior) vs. rings measured in situ by PIXL/SHERLOC (posterior)"
-            >
-              CRISM prior ↔ PDS posterior
-            </FilterToggle>
-            {currentRole === 'scientist' ? (
-              <FilterToggle
-                on={activeFilters.filter2_thermalInertia}
-                onClick={() => handleToggleRoleFilter('filter2_thermalInertia')}
-                hint="THEMIS night IR, red–blue colormap: red = warm/high thermal inertia (bedrock), blue = cold (loose sand & dust)"
-              >
-                THEMIS thermal (100 m)
-              </FilterToggle>
-            ) : (
-              <FilterToggle
-                on={activeFilters.topographySlope}
-                onClick={() => handleToggleRoleFilter('topographySlope')}
-                hint="MOLA+HRSC hillshade, >15° slope segments (red) and not-evaluated zones (amber)"
-              >
-                Slope &amp; not-evaluated zones
-              </FilterToggle>
-            )}
-            <FilterToggle
-              on={activeFilters.filter3_pdsTargetsTraverse}
-              onClick={() => handleToggleRoleFilter('filter3_pdsTargetsTraverse')}
-              hint="Perseverance rover traverse (orange dotted line) and its Sol waypoints from MMGIS/PDS. HiRISE 25 cm imagery is always on."
-            >
-              Perseverance traverse (PDS)
-            </FilterToggle>
-            {currentRole === 'scientist' && (
+          {/* Map header: quick layer chips on one row (scrolls sideways if needed) + All layers */}
+          <div className="px-4 py-2.5 flex items-center gap-2 border-b border-mh-sep shrink-0">
+            <ChipScroller label="Map layers by category">
+              {layerCategories.map((cat) => (
+                <LayerCategoryMenu key={cat.label} label={cat.label} icon={cat.icon} items={cat.items} onToggle={toggleLayer} />
+              ))}
+            </ChipScroller>
+
+            <div className="flex items-center gap-2 shrink-0 pl-2 border-l border-mh-sep">
+              {currentRole === 'scientist' && (
+                <button
+                  type="button"
+                  onClick={() => setShowFieldMap(true)}
+                  className="mh-btn mh-btn--plain !min-h-11 !px-3.5 !text-[15px]"
+                  title="Open the in-situ field discoveries (FE-…) on their own map"
+                  aria-label={`Field discoveries (${planner.state.fieldEvents.length})`}
+                >
+                  <MapPin className="w-5 h-5" aria-hidden="true" />
+                  <span className="hidden 2xl:inline">Discoveries</span>
+                  <span className="mh-pill mh-pill--info !py-0">{planner.state.fieldEvents.length}</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Timeline: one slider across the years, only dates with time-stamped data */}
+          <div className="px-5 py-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-mh-sep shrink-0">
+            <span className="mh-eyebrow shrink-0">
+              <Clock className="w-4 h-4" aria-hidden="true" />
+              Timeline
+            </span>
+            {epochs.length ? (
               <>
-                <FilterToggle
-                  on={activeFilters.uncertainty}
-                  onClick={() => handleToggleRoleFilter('uncertainty')}
-                  hint="1σ of the mineralogy layer: a dense grey veil means an uncertain orbital estimate; green rings are in-situ measurements"
+                <button
+                  type="button"
+                  className="mh-btn mh-btn--icon !w-9 !min-h-9 bg-mh-fill text-mh-text"
+                  aria-label="Previous date with data"
+                  disabled={epochIndex <= 0}
+                  onClick={() => setEpochIdx(Math.max(0, epochIndex - 1))}
                 >
-                  Uncertainty
-                </FilterToggle>
-                <FilterToggle
-                  on={activeFilters.reachable}
-                  onClick={() => handleToggleRoleFilter('reachable')}
-                  hint="Area within a 40-min walk of a shelter: what an EVA can reach under the SEP rule"
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+                <div className="flex-1 min-w-[180px] flex flex-col">
+                  <input
+                    type="range"
+                    min="0"
+                    max={epochs.length - 1}
+                    value={epochIndex}
+                    onChange={(e) => setEpochIdx(Number(e.target.value))}
+                    className="w-full h-7 cursor-pointer"
+                    aria-label="Date"
+                    aria-valuetext={epoch?.date}
+                  />
+                  {/* Where the data are: THEMIS (amber) and Perseverance (orange) */}
+                  <svg viewBox={`0 0 ${Math.max(1, epochs.length - 1)} 4`} preserveAspectRatio="none" className="w-full h-1.5 -mt-1" aria-hidden="true">
+                    {epochs.map((e, k) => (
+                      <rect key={e.date} x={k - 0.15} y={e.themis.length ? 0 : 2} width="0.3" height="2" fill={e.themis.length ? '#E5C04A' : '#FF6B35'} />
+                    ))}
+                  </svg>
+                </div>
+                <button
+                  type="button"
+                  className="mh-btn mh-btn--icon !w-9 !min-h-9 bg-mh-fill text-mh-text"
+                  aria-label="Next date with data"
+                  disabled={epochIndex >= epochs.length - 1}
+                  onClick={() => setEpochIdx(Math.min(epochs.length - 1, epochIndex + 1))}
                 >
-                  Reachable area
-                </FilterToggle>
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+                <span className="text-base font-semibold font-mono shrink-0">{epoch?.date}</span>
+                <span className="flex flex-wrap gap-1.5">
+                  {epoch?.themis.length > 0 && (
+                    <span className="mh-pill mh-pill--warn !text-[13px]">
+                      THEMIS {epoch.themis[0].night ? 'night' : 'day'} {formatLst(epoch.themis[0].lst)} LST
+                    </span>
+                  )}
+                  {epoch?.rover && <span className="mh-pill mh-pill--info !text-[13px]">Perseverance Sol {epoch.rover.sol}</span>}
+                </span>
               </>
-            )}
-            {currentRole === 'scientist' && (
-              <button
-                type="button"
-                onClick={() => setShowFieldMap(true)}
-                className="mh-btn mh-btn--plain !min-h-11 !px-4 !text-[15px] ml-auto"
-                title="Open the in-situ field discoveries (FE-…) on their own map"
-              >
-                <MapPin className="w-4 h-4" aria-hidden="true" />
-                <span>Field discoveries</span>
-                <span className="mh-pill mh-pill--info !py-0">{planner.state.fieldEvents.length}</span>
-              </button>
+            ) : (
+              <span className="text-base text-mh-text2">
+                {themisCatalogError ? `THEMIS catalogue unavailable (${themisCatalogError})` : 'Loading dates with data…'}
+              </span>
             )}
           </div>
 
@@ -1935,29 +2336,32 @@ export default function MissionPlanner() {
           >
             <div ref={mapContainerRef} className="w-full h-full z-10" />
 
-            {/* SVG filter used by .mh-thermal-rdbu: grayscale THEMIS → red–blue colormap */}
+            {/* SVG colormap filters: greyscale tiles → luminance → contrast stretch → colour table */}
             <svg width="0" height="0" className="absolute" aria-hidden="true" focusable="false">
               <defs>
-                <filter id="mh-thermal-rdbu" colorInterpolationFilters="sRGB">
-                  <feColorMatrix
-                    type="matrix"
-                    values="0.2126 0.7152 0.0722 0 0  0.2126 0.7152 0.0722 0 0  0.2126 0.7152 0.0722 0 0  0 0 0 1 0"
-                  />
-                  <feComponentTransfer>
-                    <feFuncR type="linear" slope="1.5" intercept="-0.25" />
-                    <feFuncG type="linear" slope="1.5" intercept="-0.25" />
-                    <feFuncB type="linear" slope="1.5" intercept="-0.25" />
-                  </feComponentTransfer>
-                  <feComponentTransfer>
-                    <feFuncR type="table" tableValues="0.129 0.404 0.969 0.937 0.698" />
-                    <feFuncG type="table" tableValues="0.400 0.663 0.969 0.541 0.094" />
-                    <feFuncB type="table" tableValues="0.675 0.812 0.969 0.384 0.169" />
-                  </feComponentTransfer>
-                </filter>
+                {COLORMAP_FILTERS.map((f) => (
+                  <filter key={f.id} id={f.id} colorInterpolationFilters="sRGB">
+                    <feColorMatrix
+                      type="matrix"
+                      values="0.2126 0.7152 0.0722 0 0  0.2126 0.7152 0.0722 0 0  0.2126 0.7152 0.0722 0 0  0 0 0 1 0"
+                    />
+                    <feComponentTransfer>
+                      <feFuncR type="linear" slope={f.slope} intercept={f.intercept} />
+                      <feFuncG type="linear" slope={f.slope} intercept={f.intercept} />
+                      <feFuncB type="linear" slope={f.slope} intercept={f.intercept} />
+                    </feComponentTransfer>
+                    <feComponentTransfer>
+                      <feFuncR type="table" tableValues={tableValues(f.stops, 0)} />
+                      <feFuncG type="table" tableValues={tableValues(f.stops, 1)} />
+                      <feFuncB type="table" tableValues={tableValues(f.stops, 2)} />
+                    </feComponentTransfer>
+                  </filter>
+                ))}
               </defs>
             </svg>
 
             <MapLegend
+              dataLayers={JEZERO_RASTER_CATALOG.filter((c) => c.colorScale && isLayerOn(c.id))}
               currentRole={currentRole}
               activeFilters={activeFilters}
               routeVisible={mapRouteVisible}
@@ -1965,8 +2369,55 @@ export default function MissionPlanner() {
               showFe={(currentRole === 'control' && planner.state.fieldEvents.length > 0) || (currentRole === 'scientist' && !!shownFeId)}
             />
 
+            {themisTempOn && (
+              <div className="absolute bottom-10 left-3 z-20 w-[300px] max-w-[calc(100%-1.5rem)] max-h-[calc(100%-3.5rem)] overflow-y-auto bg-mh-card text-mh-text rounded-mh-md shadow-mh p-3 flex flex-col gap-2" aria-live="polite">
+                <span className="flex items-center gap-2 font-semibold text-[15px]">
+                  <Thermometer className="w-4 h-4" aria-hidden="true" /> THEMIS brightness temperature
+                </span>
+                {themisObs ? (
+                  <span className="text-[14px] text-mh-text2">
+                    {themisObs.date} · {themisObs.night ? 'night' : 'day'} {formatLst(themisObs.lst)} LST · Ls {themisObs.ls.toFixed(0)}° · {themisObs.id}
+                  </span>
+                ) : (
+                  <span className="text-[14px] text-mh-text2">No THEMIS observation on this date. Move the timeline to an amber tick.</span>
+                )}
+                {themisLoading && <span className="text-[14px]">Loading the real data (PDS, ~0.5 MB)…</span>}
+                {themisError && <span className="text-[14px] text-mh-crit">{themisError}</span>}
+                {themisCrop && themisObs && !themisLoading && (
+                  <>
+                    <span
+                      className="h-2.5 rounded-full"
+                      aria-hidden="true"
+                      style={{ background: `linear-gradient(90deg, ${TEMPERATURE_STOPS.join(', ')})` }}
+                    />
+                    <span className="flex justify-between gap-2 text-[13px] font-mono">
+                      <span>
+                        {themisCrop.lo.toFixed(0)} K ({kToC(themisCrop.lo).toFixed(0)} °C)
+                      </span>
+                      <span>
+                        {themisCrop.hi.toFixed(0)} K ({kToC(themisCrop.hi).toFixed(0)} °C)
+                      </span>
+                    </span>
+                    <span className="text-[14px]">
+                      {tempHover ? (
+                        <>
+                          Under the cursor: <strong>{tempHover.k.toFixed(1)} K</strong> ({kToC(tempHover.k).toFixed(1)} °C)
+                        </>
+                      ) : (
+                        <span className="text-mh-text2">Move the mouse over the map to read a temperature.</span>
+                      )}
+                    </span>
+                    <span className="text-[12px] text-mh-text2">
+                      Mars Odyssey THEMIS band 9 (12.6 µm), ~100 m/px · colours stretched to this observation (2–98%) ·
+                      coverage {themisCrop.coveragePct.toFixed(0)}%
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
+
             {pickMode && (
-              <div className="absolute top-[4.25rem] left-3 z-20 mh-alert !py-2 shadow-mh max-w-[calc(100%-5rem)]" role="status">
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 mh-alert !py-2 shadow-mh max-w-[calc(100%-7rem)]" role="status">
                 <Crosshair className="w-5 h-5 shrink-0" aria-hidden="true" />
                 <p className="m-0 font-semibold">Click on the map to place the point of interest</p>
               </div>
@@ -2451,7 +2902,7 @@ export default function MissionPlanner() {
                       {lyr.instrument} · {lyr.res}
                     </span>
                   </div>
-                  <span className="mh-pill mh-pill--ok shrink-0">Coverage {lyr.coveragePct}%</span>
+                  {lyr.coveragePct != null && <span className="mh-pill mh-pill--ok shrink-0">Coverage {lyr.coveragePct}%</span>}
                 </div>
               ))}
 
@@ -2533,19 +2984,63 @@ const ROLE_LABELS = {
   astronaut: 'Astronaut'
 };
 
-function FilterToggle({ on, onClick, hint, children }) {
+// Horizontal chip row: fades at the edges and shows scroll arrows only when there is more to see
+function ChipScroller({ label, children }) {
+  const ref = useRef(null);
+  const [edge, setEdge] = useState({ l: false, r: false });
+  const update = () => {
+    const el = ref.current;
+    if (!el) return;
+    const l = el.scrollLeft > 2;
+    const r = el.scrollLeft + el.clientWidth < el.scrollWidth - 2;
+    setEdge((prev) => (prev.l === l && prev.r === r ? prev : { l, r }));
+  };
+  useEffect(() => {
+    update();
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  useEffect(update);
+  const by = (dir) => ref.current?.scrollBy({ left: dir * 220, behavior: 'smooth' });
+  const mask = `linear-gradient(to right, ${edge.l ? 'transparent 0, black 48px' : 'black 0'}, ${
+    edge.r ? 'black calc(100% - 48px), transparent 100%' : 'black 100%'
+  })`;
   return (
-    <button
-      type="button"
-      aria-pressed={on}
-      onClick={onClick}
-      title={hint}
-      className={`mh-btn !min-h-11 !px-4 !text-[15px] ${on ? 'mh-btn--tinted' : 'bg-mh-fill text-mh-text2'}`}
-    >
-      {on ? <CheckCircle2 className="w-5 h-5" aria-hidden="true" /> : <span className="w-5 h-5 rounded-full border-2 border-current" aria-hidden="true" />}
-      <span>{children}</span>
-      <span className="sr-only">{on ? '(on)' : '(off)'}</span>
-    </button>
+    <div className="relative flex-1 min-w-0">
+      <div
+        ref={ref}
+        onScroll={update}
+        role="group"
+        aria-label={label}
+        className="flex items-center gap-2 overflow-x-auto mh-no-scrollbar py-0.5"
+        style={{ maskImage: mask, WebkitMaskImage: mask }}
+      >
+        {children}
+      </div>
+      {edge.l && (
+        <button
+          type="button"
+          onClick={() => by(-1)}
+          aria-label="Show previous layers"
+          className="absolute left-0 top-1/2 -translate-y-1/2 mh-btn mh-btn--icon !w-9 !min-h-9 bg-mh-card text-mh-text shadow-mh"
+        >
+          <ChevronLeft className="w-5 h-5" />
+        </button>
+      )}
+      {edge.r && (
+        <button
+          type="button"
+          onClick={() => by(1)}
+          aria-label="Show more layers"
+          className="absolute right-0 top-1/2 -translate-y-1/2 mh-btn mh-btn--icon !w-9 !min-h-9 bg-mh-card text-mh-text shadow-mh"
+        >
+          <ChevronRight className="w-5 h-5" />
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -2602,17 +3097,20 @@ function LegendSection({ title, children }) {
   );
 }
 
-function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe }) {
+function MapLegend({ dataLayers = [], currentRole, activeFilters, routeVisible, showDraft, showFe }) {
   const isSci = currentRole === 'scientist';
   const [open, setOpen] = useState(false); // closed by default: the map stays clean
   const notHud = currentRole !== 'astronaut';
   const showFusion = activeFilters.filter1_spectralFusion && notHud;
-  const showThermal = activeFilters.filter2_thermalInertia && notHud;
   const showHazards = activeFilters.topographySlope || currentRole === 'control';
   const showTraverse = activeFilters.filter3_pdsTargetsTraverse && notHud;
 
   return (
-    <div className="absolute top-3 left-3 z-20 w-[270px] max-w-[calc(100%-5rem)] max-h-[calc(100%-1.5rem)] flex flex-col bg-mh-card text-mh-text rounded-mh-md shadow-mh overflow-hidden">
+    <div
+      className={`absolute top-3 left-3 w-[270px] max-w-[calc(100%-5rem)] max-h-[calc(100%-1.5rem)] flex flex-col bg-mh-card text-mh-text rounded-mh-md shadow-mh overflow-hidden ${
+        open ? 'z-40 ring-1 ring-mh-sep' : 'z-20' // open legend sits above every other map overlay
+      }`}
+    >
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -2627,7 +3125,7 @@ function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe
       </button>
 
       {open && (
-        <div className="px-3 pb-3 flex flex-col gap-3 overflow-y-auto text-[14px] leading-snug">
+        <div className="px-3 pt-1 pb-3 flex flex-col gap-3 overflow-y-auto text-[14px] leading-snug border-t border-mh-sep">
           <LegendSection title="Points of interest">
             {[
               ['HIGH', 'High priority'],
@@ -2667,19 +3165,34 @@ function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe
             </LegendSection>
           )}
 
-          {showThermal && (
-            <LegendSection title="THEMIS night thermal">
-              <li className="flex flex-col gap-1">
-                <span
-                  className="h-2.5 rounded-full"
-                  aria-hidden="true"
-                  style={{ background: `linear-gradient(90deg, ${THERMAL_RDBU_STOPS.join(', ')})` }}
-                />
-                <span className="flex justify-between gap-2 text-mh-text2">
-                  <span>Cold · sand/dust</span>
-                  <span>Warm · bedrock</span>
-                </span>
-              </li>
+          {dataLayers.length > 0 && (
+            <LegendSection title="Data layers · colour scales">
+              {dataLayers.map((c) => (
+                <li key={c.id} className="flex flex-col gap-1">
+                  <span className="font-semibold">{c.name}</span>
+                  {c.colorScale.stops ? (
+                    <>
+                      <span
+                        className="h-2.5 rounded-full"
+                        aria-hidden="true"
+                        style={{ background: `linear-gradient(90deg, ${c.colorScale.stops.join(', ')})` }}
+                      />
+                      <span className="flex justify-between gap-2 text-mh-text2">
+                        <span>{c.colorScale.low}</span>
+                        <span className="text-right">{c.colorScale.high}</span>
+                      </span>
+                      <span className="text-[12px] text-mh-text2">
+                        {c.className
+                          ? 'Re-coloured here · stretched to the values around Jezero (relative)'
+                          : 'NASA colour scale (bar is approximate)'}
+                        {/km\/px/.test(c.res ?? '') && ` · ${c.res}: zoom out to see the variation`}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-mh-text2">{c.colorScale.note}</span>
+                  )}
+                </li>
+              ))}
             </LegendSection>
           )}
 
