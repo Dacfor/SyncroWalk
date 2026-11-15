@@ -1,7 +1,8 @@
 import { ChevronRight, Pause, Play, Square } from 'lucide-react';
 
 /**
- * Control bar of the scripted demo: step counter, step title, progress and the controls
+ * Scripted demo controls, shown in the bottom status bar (right before "Last update") while the demo
+ * runs: step counter, step title, progress and the controls
  * (Esc stops, → skips to the next step, Space pauses / resumes).
  */
 export default function DemoBar({
@@ -23,30 +24,33 @@ export default function DemoBar({
   onTogglePause: () => void;
   onStop: () => void;
 }) {
+  const btn = 'inline-flex items-center justify-center w-6 h-6 rounded-mh-sm bg-mh-nav-fill text-mh-nav-text hover:opacity-80';
   return (
-    <div className="fixed inset-x-0 bottom-0 z-[1300] pointer-events-none flex justify-center px-4 pb-12" role="status" aria-live="polite">
-      <div className="pointer-events-auto rounded-mh-md shadow-mh ring-1 ring-white/15 bg-[#0A0A0A]/92 text-white backdrop-blur-sm overflow-hidden">
-        <div className="h-1 bg-white/15">
-          <div className="h-full bg-[#FF6B35] transition-[width] duration-300 ease-linear" style={{ width: `${Math.min(100, Math.max(0, progress * 100))}%` }} />
-        </div>
-        <div className="px-4 py-2 flex items-center gap-4">
-          <span className="font-mono text-[15px] text-white/70 shrink-0">
-            {step}/{total}
-          </span>
-          <span className="text-[17px] font-semibold whitespace-nowrap">{title}</span>
-          <span className="flex items-center gap-1 shrink-0">
-            <button type="button" className="mh-btn mh-btn--icon !bg-white/10 !text-white" onClick={onTogglePause} title={paused ? 'Resume (Space)' : 'Pause (Space)'} aria-label={paused ? 'Resume demo' : 'Pause demo'}>
-              {paused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
-            </button>
-            <button type="button" className="mh-btn mh-btn--icon !bg-white/10 !text-white" onClick={onNext} title="Next step (→)" aria-label="Next demo step">
-              <ChevronRight className="w-4 h-4" />
-            </button>
-            <button type="button" className="mh-btn mh-btn--icon !bg-white/10 !text-white" onClick={onStop} title="Stop the demo (Esc)" aria-label="Stop demo">
-              <Square className="w-4 h-4" />
-            </button>
-          </span>
-        </div>
-      </div>
-    </div>
+    <span
+      className="inline-flex items-center gap-2 shrink-0 min-h-7 px-3 border-r border-mh-nav-fill"
+      role="status"
+      aria-live="polite"
+      aria-label="Scripted demo"
+    >
+      <span className="font-mono text-[12px] text-[#FF6B35] font-semibold">DEMO</span>
+      <span className="font-mono text-[12px] text-mh-nav-text2 tabular-nums">
+        {step}/{total}
+      </span>
+      <strong className="text-[13px] font-semibold text-mh-nav-text">{title}</strong>
+      <span className="w-24 h-1 rounded-full bg-mh-nav-fill overflow-hidden" aria-hidden="true">
+        <span className="block h-full bg-[#FF6B35] transition-[width] duration-300 ease-linear" style={{ width: `${Math.min(100, Math.max(0, progress * 100))}%` }} />
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <button type="button" className={btn} onClick={onTogglePause} title={paused ? 'Resume (Space)' : 'Pause (Space)'} aria-label={paused ? 'Resume demo' : 'Pause demo'}>
+          {paused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
+        </button>
+        <button type="button" className={btn} onClick={onNext} title="Next step (→)" aria-label="Next demo step">
+          <ChevronRight className="w-3.5 h-3.5" />
+        </button>
+        <button type="button" className={btn} onClick={onStop} title="Stop the demo (Esc)" aria-label="Stop demo">
+          <Square className="w-3.5 h-3.5" />
+        </button>
+      </span>
+    </span>
   );
 }

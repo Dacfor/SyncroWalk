@@ -505,22 +505,21 @@ const buildPoiPopupHtml = (poi, elevM, scheduledSols, role = 'scientist') => {
         ${row('Information to collect', poi.infoToCollect)}
         ${row('Samples', poi.samplesRequired ? poi.sampleNotes || 'Required' : 'Not requested')}
         ${row('Orbital mineralogy (prior)', `${prior.mineral} · ${prior.hydrationEst ?? ''} · σ ${prior.uncertainty}`)}
-        ${
-          sampled
-            ? row('Elemental chemistry (PIXL XRF)', post.pixl) +
-              row('Mineral phases (SHERLOC Raman)', post.sherloc) +
-              row('Texture (SuperCam)', post.supercam) +
-              row(
-                'Hydration (in situ)',
-                (() => {
-                  const h = getHydration(poi).posterior;
-                  return h
-                    ? `${fmtNum(h.value, 1)} ± ${fmtNum(h.sigma)} wt% H₂O (1σ, ${fmtNum(h.relPct, 1)}%) · handheld PIXL/SHERLOC · demo value`
-                    : post.hydrationPosterior;
-                })()
-              )
-            : row('In-situ composition', 'Not sampled yet — orbital prior only.')
-        }
+        ${sampled
+      ? row('Elemental chemistry (PIXL XRF)', post.pixl) +
+      row('Mineral phases (SHERLOC Raman)', post.sherloc) +
+      row('Texture (SuperCam)', post.supercam) +
+      row(
+        'Hydration (in situ)',
+        (() => {
+          const h = getHydration(poi).posterior;
+          return h
+            ? `${fmtNum(h.value, 1)} ± ${fmtNum(h.sigma)} wt% H₂O (1σ, ${fmtNum(h.relPct, 1)}%) · handheld PIXL/SHERLOC · demo value`
+            : post.hydrationPosterior;
+        })()
+      )
+      : row('In-situ composition', 'Not sampled yet — orbital prior only.')
+    }
         ${row('Biosignature potential', post?.biosignatureRating)}
         ${row('Instruments', poi.instruments.map(instrumentName).join(', '))}
         ${row('Time on site', `${poi.durationMin} min`)}
@@ -669,6 +668,7 @@ export default function MissionPlanner() {
   const demoAutoStartedRef = useRef(false);
   const stateRef = useRef(planner.state);
   stateRef.current = planner.state;
+  const decisionPanelRef = useRef(null); // right-hand panel, scrolled top → bottom by the demo
 
   // Layers: user choices from "All layers" (role-driven layers follow activeFilters instead)
   const [layerOverrides, setLayerOverrides] = useState({});
@@ -724,13 +724,13 @@ export default function MissionPlanner() {
         // CRISM MTRDR browse products (real PDS data, Scientist only): one at a time
         ...(currentRole === 'scientist'
           ? COMPOSITION_LAYERS.filter((l) => l.scenes.length).map((l) => ({
-              id: `crism:${l.id}`,
-              name: l.label,
-              description: `${l.colors.map(([, meaning]) => meaning).join(' · ')}.${l.note ? ` ${l.note}` : ''} One composition layer at a time.`,
-              instrument: l.source,
-              res: l.resolution,
-              on: activeFilters.composition === l.id
-            }))
+            id: `crism:${l.id}`,
+            name: l.label,
+            description: `${l.colors.map(([, meaning]) => meaning).join(' · ')}.${l.note ? ` ${l.note}` : ''} One composition layer at a time.`,
+            instrument: l.source,
+            res: l.resolution,
+            on: activeFilters.composition === l.id
+          }))
           : [])
       ]
     },
@@ -755,61 +755,61 @@ export default function MissionPlanner() {
       items: [
         ...(currentRole !== 'scientist'
           ? [
-              {
-                id: 'hazards',
-                name: 'Field hazards',
-                description: 'Operational hazards reported in the field: boulders and soft soil.',
-                on: !!activeFilters.hazards
-              },
-              {
-                id: 'shelters',
-                name: 'Shelters & 40-min ring',
-                description: 'SEP shelters and the line within a 40-min walk of each of them.',
-                on: !!activeFilters.shelters
-              }
-            ]
+            {
+              id: 'hazards',
+              name: 'Field hazards',
+              description: 'Operational hazards reported in the field: boulders and soft soil.',
+              on: !!activeFilters.hazards
+            },
+            {
+              id: 'shelters',
+              name: 'Shelters & 40-min ring',
+              description: 'SEP shelters and the line within a 40-min walk of each of them.',
+              on: !!activeFilters.shelters
+            }
+          ]
           : []),
         ...(currentRole !== 'astronaut'
           ? [
-              {
-                id: 'routeHistory',
-                name: 'Route history',
-                description:
-                  'Past EVA tracks coloured by outcome (completed / partial / aborted). Click a track for date, pair, real vs planned duration and POIs reached.',
-                on: !!activeFilters.routeHistory
-              },
-              {
-                id: 'validatedTerrain',
-                name: 'Validated terrain',
-                description: 'Trafficability validated in situ on the stretches the crew has walked (from the EVA debriefs).',
-                on: !!activeFilters.validatedTerrain
-              }
-            ]
+            {
+              id: 'routeHistory',
+              name: 'Route history',
+              description:
+                'Past EVA tracks coloured by outcome (completed / partial / aborted). Click a track for date, pair, real vs planned duration and POIs reached.',
+              on: !!activeFilters.routeHistory
+            },
+            {
+              id: 'validatedTerrain',
+              name: 'Validated terrain',
+              description: 'Trafficability validated in situ on the stretches the crew has walked (from the EVA debriefs).',
+              on: !!activeFilters.validatedTerrain
+            }
+          ]
           : [])
       ]
     },
     ...(currentRole === 'scientist'
       ? [
-          {
-            label: 'Analysis',
-            icon: CircleDashed,
-            items: [
-              {
-                id: 'uncertainty',
-                name: 'Uncertainty (1σ)',
-                description:
-                  'How certain the orbital mineralogy is: a dense grey veil = uncertain estimate; tight green rings = in-situ measurements.',
-                on: !!activeFilters.uncertainty
-              },
-              {
-                id: 'reachable',
-                name: 'Reachable area',
-                description: 'Area within a 40-min walk of a shelter: what an EVA can reach under the SEP rule (demo model).',
-                on: !!activeFilters.reachable
-              }
-            ]
-          }
-        ]
+        {
+          label: 'Analysis',
+          icon: CircleDashed,
+          items: [
+            {
+              id: 'uncertainty',
+              name: 'Uncertainty (1σ)',
+              description:
+                'How certain the orbital mineralogy is: a dense grey veil = uncertain estimate; tight green rings = in-situ measurements.',
+              on: !!activeFilters.uncertainty
+            },
+            {
+              id: 'reachable',
+              name: 'Reachable area',
+              description: 'Area within a 40-min walk of a shelter: what an EVA can reach under the SEP rule (demo model).',
+              on: !!activeFilters.reachable
+            }
+          ]
+        }
+      ]
       : [])
   ];
 
@@ -1016,6 +1016,46 @@ export default function MissionPlanner() {
     if (!demo || demo.paused) return;
     const id = setInterval(() => setDemoNow(Date.now()), 250);
     return () => clearInterval(id);
+  }, [demo]);
+  // Demo auto-scroll: during each step the panel on screen (the briefing when open, otherwise the
+  // decision panel) scrolls down from the top at a steady reading speed. Short panels reach the
+  // bottom and hold there; long ones stop wherever they are when the next step starts. Driven by
+  // the demo clock, so pause, resume and "next step" stay in sync.
+  useEffect(() => {
+    if (!demo || demo.paused) return;
+    const LEAD = 1.5; // s after the step starts (views switch, the briefing opens at +0.6 s)
+    const TAIL = 1.0; // s held at the bottom before the next step (short panels only)
+    const MAX_SPEED = 250; // px/s at most, so long panels stay readable
+    let raf = 0;
+    let lastStep = -1;
+    const tick = () => {
+      const d = demoRef.current;
+      if (!d || d.paused) return;
+      const i = d.step;
+      const st = DEMO_SOL58_STEPS[i];
+      const end = DEMO_SOL58_STEPS[i + 1]?.at ?? DEMO_SOL58_SECONDS;
+      const el = document.querySelector('.mh-print-scroll') ?? decisionPanelRef.current;
+      if (st && el) {
+        const max = el.scrollHeight - el.clientHeight;
+        if (i !== lastStep) {
+          el.scrollTop = 0; // every step starts from the top of its panel
+          lastStep = i;
+        }
+        if (max > 4) {
+          const elapsed = (Date.now() - d.t0) / 1000;
+          const span = Math.max(0.5, end - st.at - LEAD - TAIL);
+          const t = Math.max(0, elapsed - st.at - LEAD);
+          // Short panel: ease to the bottom within the step. Long panel: cap the speed and
+          // simply stop where the step ends (soft 1 s start so it does not jerk).
+          const speed = Math.min(MAX_SPEED, max / span);
+          const dist = speed * (t < 1 ? (t * t) / 2 : t - 0.5); // accelerates over the first second
+          el.scrollTop = Math.min(max, dist);
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
   }, [demo]);
   // ?demo=sol58 starts the demo once the map exists
   useEffect(() => {
@@ -1466,8 +1506,8 @@ export default function MissionPlanner() {
       const alcove = SHELTERS.find((sh) => sh.id === 'ALCOVE');
       if (isSci ? activeFilters.reachable : activeFilters.shelters)
         L.circleMarker([alcove.lat, alcove.lon], { radius: 7, color: '#ffffff', weight: 2.5, fillColor: '#35B17A', fillOpacity: 1 })
-        .bindTooltip(`${alcove.name} · SEP shelter`, { direction: 'top' })
-        .addTo(analysisGroup);
+          .bindTooltip(`${alcove.name} · SEP shelter`, { direction: 'top' })
+          .addTo(analysisGroup);
     }
 
     // 3c. Route history + trafficability validated in situ (Scientist, Mission Control)
@@ -1684,12 +1724,12 @@ export default function MissionPlanner() {
     const ro =
       typeof ResizeObserver !== 'undefined'
         ? new ResizeObserver(() => {
-            fmap.invalidateSize();
-            if (firstResize) {
-              firstResize = false;
-              fitAll();
-            }
-          })
+          fmap.invalidateSize();
+          if (firstResize) {
+            firstResize = false;
+            fitAll();
+          }
+        })
         : null;
     ro?.observe(el);
     const onKey = (e) => e.key === 'Escape' && setShowFieldMap(false);
@@ -1914,12 +1954,12 @@ export default function MissionPlanner() {
     const ro =
       typeof ResizeObserver !== 'undefined'
         ? new ResizeObserver(() => {
-            bmap.invalidateSize();
-            if (first) {
-              first = false;
-              fit();
-            }
-          })
+          bmap.invalidateSize();
+          if (first) {
+            first = false;
+            fit();
+          }
+        })
         : null;
     ro?.observe(el);
     const onKey = (e) => e.key === 'Escape' && setShowBriefing(false);
@@ -2155,24 +2195,10 @@ export default function MissionPlanner() {
         </div>
       </header>
 
-      {/* Scripted demo caption bar (Sol 58) */}
-      {demo && demoStep && (
-        <DemoBar
-          step={demo.step + 1}
-          total={DEMO_SOL58_STEPS.length}
-          title={demoStep.title}
-          progress={demoElapsed / DEMO_SOL58_SECONDS}
-          paused={demo.paused}
-          onNext={nextDemoStep}
-          onTogglePause={toggleDemoPause}
-          onStop={stopDemo}
-        />
-      )}
-
       {/* Toast Notification — floats, so the layout never jumps */}
       {toastMsg && (
         <div
-          className={`fixed ${demo ? 'bottom-28' : 'bottom-4'} inset-x-4 sm:inset-x-auto sm:right-6 sm:max-w-md z-50`}
+          className={`fixed bottom-4 inset-x-4 sm:inset-x-auto sm:right-6 sm:max-w-md z-50`}
           role="status"
           aria-live="polite"
         >
@@ -2198,9 +2224,8 @@ export default function MissionPlanner() {
         {/* LEFT: PERSISTENT LEAFLET MAP CARD */}
         <section
           ref={mapSectionRef}
-          className={`flex flex-col bg-mh-card rounded-mh-lg shadow-mh overflow-hidden scroll-mt-6 lg:h-full lg:min-h-0 ${
-            mapExpanded ? 'lg:col-span-2' : ''
-          }`}
+          className={`flex flex-col bg-mh-card rounded-mh-lg shadow-mh overflow-hidden scroll-mt-6 lg:h-full lg:min-h-0 ${mapExpanded ? 'lg:col-span-2' : ''
+            }`}
           aria-label="Jezero map"
         >
           {/* Map header: quick layer chips on one row (scrolls sideways if needed) + All layers */}
@@ -2291,9 +2316,8 @@ export default function MissionPlanner() {
 
           {/* Map */}
           <div
-            className={`relative ${pickMode ? 'pick-mode' : ''} ${
-              mapExpanded ? 'h-[calc(100vh-10rem)] min-h-[420px]' : 'h-[420px] sm:h-[520px]'
-            } lg:h-auto lg:flex-1 lg:min-h-0`}
+            className={`relative ${pickMode ? 'pick-mode' : ''} ${mapExpanded ? 'h-[calc(100vh-10rem)] min-h-[420px]' : 'h-[420px] sm:h-[520px]'
+              } lg:h-auto lg:flex-1 lg:min-h-0`}
           >
             <div ref={mapContainerRef} className="w-full h-full z-10" />
 
@@ -2328,6 +2352,7 @@ export default function MissionPlanner() {
               routeVisible={mapRouteVisible}
               showDraft={currentRole === 'scientist' && !!draftPoint}
               showFe={(currentRole !== 'scientist' && activeFilters.hazards && planner.state.fieldEvents.some(isHazard)) || (currentRole === 'scientist' && !!shownFeId)}
+              forceOpen={!!demo} // open for the whole scripted demo
             />
 
             {themisTempOn && (
@@ -2480,6 +2505,7 @@ export default function MissionPlanner() {
 
         {/* RIGHT: ROLE-SPECIFIC DECISION DECK (scrolls with the page) */}
         <aside
+          ref={decisionPanelRef}
           className={`flex flex-col gap-5 sm:gap-6 min-w-0 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:pb-2 ${mapExpanded ? 'lg:hidden' : ''}`}
           aria-label="Decision panel"
         >
@@ -2578,6 +2604,20 @@ export default function MissionPlanner() {
             trek={dataLink.trek}
             mmgis={dataLink.mmgis}
             lastUpdate={lastUpdate}
+            demo={
+              demo && demoStep ? (
+                <DemoBar
+                  step={demo.step + 1}
+                  total={DEMO_SOL58_STEPS.length}
+                  title={demoStep.title}
+                  progress={demoElapsed / DEMO_SOL58_SECONDS}
+                  paused={demo.paused}
+                  onNext={nextDemoStep}
+                  onTogglePause={toggleDemoPause}
+                  onStop={stopDemo}
+                />
+              ) : null
+            }
           />
         );
       })()}
@@ -2789,9 +2829,8 @@ function ChipScroller({ label, children }) {
   }, []);
   useEffect(update);
   const by = (dir) => ref.current?.scrollBy({ left: dir * 220, behavior: 'smooth' });
-  const mask = `linear-gradient(to right, ${edge.l ? 'transparent 0, black 48px' : 'black 0'}, ${
-    edge.r ? 'black calc(100% - 48px), transparent 100%' : 'black 100%'
-  })`;
+  const mask = `linear-gradient(to right, ${edge.l ? 'transparent 0, black 48px' : 'black 0'}, ${edge.r ? 'black calc(100% - 48px), transparent 100%' : 'black 100%'
+    })`;
   return (
     <div className="relative flex-1 min-w-0">
       <div
@@ -2881,9 +2920,11 @@ function LegendSection({ title, children }) {
   );
 }
 
-function MapLegend({ dataLayers = [], currentRole, activeFilters, routeVisible, showDraft, showFe }) {
+function MapLegend({ dataLayers = [], currentRole, activeFilters, routeVisible, showDraft, showFe, forceOpen = false }) {
   const isSci = currentRole === 'scientist';
   const [open, setOpen] = useState(false); // closed by default: the map stays clean
+  // The scripted demo opens it when it starts and closes it again when it ends (it can still be toggled)
+  useEffect(() => setOpen(forceOpen), [forceOpen]);
   const notHud = currentRole !== 'astronaut';
   const showFusion = activeFilters.filter1_spectralFusion && notHud;
   const showHazards = notHud ? activeFilters.topographySlope : activeFilters.hazards;
@@ -2893,9 +2934,8 @@ function MapLegend({ dataLayers = [], currentRole, activeFilters, routeVisible, 
 
   return (
     <div
-      className={`absolute top-3 left-3 w-[270px] max-w-[calc(100%-5rem)] max-h-[calc(100%-1.5rem)] flex flex-col bg-mh-card text-mh-text rounded-mh-md shadow-mh overflow-hidden ${
-        open ? 'z-40 ring-1 ring-mh-sep' : 'z-20' // open legend sits above every other map overlay
-      }`}
+      className={`absolute top-3 left-3 w-[270px] max-w-[calc(100%-5rem)] max-h-[calc(100%-1.5rem)] flex flex-col bg-mh-card text-mh-text rounded-mh-md shadow-mh overflow-hidden ${open ? 'z-40 ring-1 ring-mh-sep' : 'z-20' // open legend sits above every other map overlay
+        }`}
     >
       <button
         type="button"
