@@ -10,7 +10,8 @@ const STEP_LABEL: Record<ReplanStepCode, string> = {
   a: 'a · Drop POI',
   b: 'b · Shorten',
   c: 'c · Shelter',
-  d: 'd · Postpone'
+  d: 'd · Postpone',
+  sci: 'Science'
 };
 
 const verdict = (s: PlanSummary) =>

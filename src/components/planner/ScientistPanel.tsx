@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Crosshair, FlaskConical, Gem, Lightbulb, List, Map as MapIcon, MapPin, MapPinPlus, Pencil, PlusCircle, Trash2 } from 'lucide-react';
+import { Crosshair, FlaskConical, Gem, Lightbulb, List, Map as MapIcon, MapPin, MapPinPlus, Pencil, PlusCircle, ScrollText, Trash2 } from 'lucide-react';
+import MissionLog from './MissionLog.tsx';
 import { DiscoveryDetail, DiscoveryList } from './Discoveries.tsx';
 import { Card, Label, PanelTabs, Segmented, TabPanel } from './ui.tsx';
 import { FIELD_EVENT_META, INTEREST_TYPES, PRIORITY_META, planFor } from './model.ts';
@@ -20,7 +21,7 @@ import type { FieldEvent, Poi } from './model.ts';
 import type { PlannerStore } from './usePlannerStore.ts';
 
 type LatLon = { lat: number; lon: number } | null;
-export type ScientistView = 'define' | 'list' | 'discoveries' | 'hypotheses';
+export type ScientistView = 'define' | 'list' | 'discoveries' | 'hypotheses' | 'log';
 
 const EMPTY_FORM = {
   name: '',
@@ -232,7 +233,8 @@ export default function ScientistPanel({
           { id: 'define', label: editingId ? 'Edit point' : 'Add point', icon: MapPinPlus },
           { id: 'list', label: 'My points', icon: List, badge: state.pois.length },
           { id: 'discoveries', label: 'Discoveries', icon: Gem, badge: fieldEvents.filter((f) => !poiFromFe(f.id)).length },
-          { id: 'hypotheses', label: 'Hypotheses', icon: Lightbulb }
+          { id: 'hypotheses', label: 'Hypotheses', icon: Lightbulb },
+          { id: 'log', label: 'Log', icon: ScrollText }
         ]}
       />
 
@@ -495,7 +497,11 @@ export default function ScientistPanel({
                   ) : (
                     <span className="mh-pill mh-pill--warn">Awaiting priority</span>
                   )}
-                  {state.measured.includes(poi.id) && <span className="mh-pill mh-pill--ok">Measured</span>}
+                  {(state.measured.includes(poi.id) || poi.measuredAt) && (
+                    <span className="mh-pill mh-pill--ok">Measured in situ{poi.measuredAt ? ` · ${poi.measuredAt}` : ''}</span>
+                  )}
+                  {!poi.pdsInSituPosterior && <span className="mh-pill mh-pill--warn">Orbital prior only</span>}
+                  {poi.parentId && <span className="mh-pill mh-pill--info">Follow-up of {poi.parentId}</span>}
                   {sols.length > 0 && (
                     <span className="mh-pill mh-pill--ok">Scheduled Sol {sols.join(', ')}</span>
                   )}
@@ -557,6 +563,12 @@ export default function ScientistPanel({
               />
             </Card>
           )}
+        </TabPanel>
+      )}
+
+      {view === 'log' && (
+        <TabPanel id="log">
+          <MissionLog state={state} />
         </TabPanel>
       )}
 

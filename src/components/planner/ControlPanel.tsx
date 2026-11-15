@@ -14,10 +14,12 @@ import {
   Send,
   Trash2,
   Users,
+  ScrollText,
   ShieldAlert,
   X
 } from 'lucide-react';
 import { ReplanCard } from './Replan.tsx';
+import MissionLog from './MissionLog.tsx';
 import {
   CONSTRAINT_STATUS,
   DEMO_ASSUMPTIONS as A,
@@ -50,7 +52,7 @@ const byPriority = (a: Poi, b: Poi) =>
 
 const DURATIONS = [15, 30, 45, 60, 90, 120];
 
-export type ControlView = 'pois' | 'calendar' | 'route' | 'crew' | 'environment';
+export type ControlView = 'pois' | 'calendar' | 'route' | 'crew' | 'environment' | 'log';
 
 /**
  * MISSION CONTROL — prioritises the scientist's points of interest, assigns the
@@ -146,7 +148,8 @@ export default function ControlPanel({
           { id: 'calendar', label: 'Calendar', icon: CalendarDays, badge: pending },
           { id: 'route', label: mission ? `Route · Sol ${mission.sol}` : 'Route', icon: Route },
           { id: 'crew', label: 'Crew', icon: Users, badge: crewToWatch },
-          { id: 'environment', label: 'Environment', icon: Radio, badge: state.sepAlert ? '!' : undefined }
+          { id: 'environment', label: 'Environ.', icon: Radio, badge: state.sepAlert ? '!' : undefined },
+          { id: 'log', label: 'Log', icon: ScrollText }
         ]}
       />
 
@@ -899,6 +902,13 @@ export default function ControlPanel({
               (NASA-STD-3001) shown for context only.
             </p>
           </Card>
+        </TabPanel>
+      )}
+
+      {/* ── 6. Mission log ──────────────────────────────────────────────── */}
+      {view === 'log' && (
+        <TabPanel id="log">
+          <MissionLog state={state} />
         </TabPanel>
       )}
 

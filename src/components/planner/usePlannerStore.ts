@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { APPROVER, SEED_STATE, applyDebrief, missionVersion, newMissionId, nextPoiId, planFor } from './model.ts';
 import { marsLmst } from './analysis.ts';
+import { scenarioState } from './scenarios/index.ts';
 import type { DailyMission, Debrief, FieldEvent, LogEntry, PlannerState, Poi, Priority, ReplanSuggestion, Role } from './model.ts';
 
 // Versioned key: bump it whenever the saved shape or the seed changes, so an old state
@@ -240,8 +241,13 @@ export function usePlannerStore() {
       }));
     },
 
+    // Scenario selector: loads a complete seed
+    loadScenario(id: string) {
+      setState(scenarioState(id));
+    },
+    // "Reset demo": back to the seed of the scenario in use
     resetDemoData() {
-      setState(SEED_STATE);
+      setState((s) => scenarioState(s.scenarioId));
     }
   };
 

@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { ClipboardCheck, X } from 'lucide-react';
 import { sampleBagIds } from './Briefing.tsx';
 import { BASE, FIELD_SHELTER_NAME, crewAssignment, missionVersion, planFor } from './model.ts';
-import { marsLmst } from './analysis.ts';
+import { addMinutesToLst, marsLmst } from './analysis.ts';
 import type { DailyMission, Debrief, DebriefLeg, DebriefPoi, PlannerState, PoiOutcome, TrafficRating } from './model.ts';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -86,7 +86,8 @@ export default function EvaDebrief({
   const [tlx, setTlx] = useState({ mental: 40, physical: 50, temporal: 35 });
   const [psych, setPsych] = useState('Nominal');
   const [signedBy, setSignedBy] = useState(ev[0]?.name ?? '');
-  const [signedAt, setSignedAt] = useState(() => `${marsLmst()} LST`);
+  // Default signature time: 20 min after the planned end of the EVA (mission clock, LST)
+  const [signedAt, setSignedAt] = useState(() => `${addMinutesToLst(m.endLst, 20)} LST`);
   const [error, setError] = useState<string | null>(null);
 
   const setPoi = (i: number, patch: Partial<DebriefPoi>) => setPois((list) => list.map((x, k) => (k === i ? { ...x, ...patch } : x)));

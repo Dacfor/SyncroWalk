@@ -1,39 +1,17 @@
 // @ts-nocheck -- ported from a standalone prototype; remove once the file is fully typed.
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
-  Compass,
   Layers,
-  AlertTriangle,
   CheckCircle2,
-  Clock,
-  ShieldAlert,
-  Navigation,
-  Camera,
-  ArrowUp,
-  ArrowDown,
   FileJson,
-  Radio,
   Crosshair,
-  Eye,
   Database,
-  Sparkles,
-  CheckSquare,
-  Hammer,
-  FlaskConical,
-  Drill,
-  Cpu,
   X,
-  Sliders,
-  GitBranch,
   ZoomIn,
   ZoomOut,
   PlusCircle,
-  Zap,
   Server,
-  Activity,
   MapPin,
-  Filter,
-  FastForward,
   Maximize2,
   Minimize2,
   Sun,
@@ -50,24 +28,19 @@ import { DiscoveryDetail, DiscoveryList } from './planner/Discoveries.tsx';
 import UserMenu from './planner/UserMenu.tsx';
 import EvaBriefing from './planner/Briefing.tsx';
 import EvaDebrief from './planner/Debrief.tsx';
+import { SCENARIOS, scenarioById } from './planner/scenarios/index.ts';
 import { COMPOSITION_LAYERS, CompositionMenu, compositionLayer } from './planner/LayerMenus.tsx';
-import { BASE, FIELD_EVENT_META, PRIORITY_META, SEAT_LABEL, crewAssignment, instrumentName, isHazard, planFor } from './planner/model.ts';
+import { BASE, FIELD_EVENT_META, PRIORITY_META, instrumentName, isHazard, pastEvaPath, planFor, solDate } from './planner/model.ts';
 import {
   DEMO_ASSUMPTIONS,
-  MISSION_OBJECTIVE,
   PRIOR_ZONES,
   SHELTERS,
   SLOPE_FEATURES,
-  TIME_WINDOW,
-  addMinutesToLst,
-  distKm,
   getHydration,
-  lstToMin,
   residualLevel,
   shelterIsochrone
 } from './planner/analysis.ts';
-import { SimBadge, ValueWithUncertainty, fmtNum } from './planner/analysisUi.tsx';
-import { Stat } from './planner/ui.tsx';
+import { SimBadge, fmtNum } from './planner/analysisUi.tsx';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // §1 REAL JEZERO CRATER CONFIGURATION (FROM index_2.html & map_2.py)
@@ -227,6 +200,18 @@ const POI_FLAG_COLORS = {
 };
 const flagColor = (poi) => POI_FLAG_COLORS[poi.priority ?? 'NONE'];
 
+// Route history: colour by outcome (always with the outcome written in the popup / legend)
+const EVA_OUTCOME = {
+  completed: { color: '#56F000', label: 'Completed' },
+  partial: { color: '#FCE83A', label: 'Partial' },
+  aborted: { color: '#FF3838', label: 'Aborted' }
+};
+const TRAFFIC_STYLE = {
+  easier: { color: '#2DCCFF', label: 'Easier than predicted (+15 % speed)' },
+  expected: { color: '#56F000', label: 'As predicted' },
+  harder: { color: '#FFB302', label: 'Harder than predicted (−30 % speed)' }
+};
+
 const escapeHtml = (value) =>
   String(value ?? '').replace(
     /[&<>"']/g,
@@ -234,7 +219,7 @@ const escapeHtml = (value) =>
   );
 
 // Flag marker: pole anchored on the coordinates, label = stop order on the route shown
-const flagSvg = (color, label = '', size = 1) =>
+const flagSvg = (color, label = '', size = 1, measured = false) =>
   `<svg width="${30 * size}" height="${36 * size}" viewBox="0 0 30 36" aria-hidden="true">` +
   `<line x1="5" y1="3" x2="5" y2="34" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round"/>` +
   `<line x1="5" y1="3" x2="5" y2="34" stroke="#1C1C1E" stroke-width="1.6" stroke-linecap="round"/>` +
@@ -242,6 +227,8 @@ const flagSvg = (color, label = '', size = 1) =>
   (label
     ? `<text x="14.5" y="14" text-anchor="middle" font-size="9.5" font-weight="700" fill="#ffffff" font-family="DM Mono, ui-monospace, monospace">${escapeHtml(label)}</text>`
     : '') +
+  // In-situ measurement on file: green dot at the foot of the pole
+  (measured ? `<circle cx="5" cy="31" r="4.2" fill="#56F000" stroke="#0b0f14" stroke-width="1.4"/>` : '') +
   `</svg>`;
 
 // Orbital context for a scientist-defined POI, inferred from the CRISM prior zones drawn on the map
@@ -291,6 +278,8 @@ const buildPoiPopupHtml = (poi, elevM, scheduledSols, role = 'scientist') => {
       <strong class="mh-poi-popup__title">${escapeHtml(poi.name)}</strong>
       <dl>
         ${row('Type of interest', poi.interestType)}
+        ${row('Follow-up of', poi.parentId)}
+        ${row('Measured in situ', poi.measuredAt ? `${poi.measuredAt} (${solDate(Number(poi.measuredAt.match(/Sol (\d+)/)?.[1] ?? 1))}, simulated history)` : '')}
         ${row('Geological unit', poi.geologicalUnit)}
         ${row('Location', `${poi.lat.toFixed(4)}° N · ${poi.lon.toFixed(4)}° E · MOLA ${elevM} m`)}
         ${row('Information to collect', poi.infoToCollect)}
@@ -351,7 +340,9 @@ const DEFAULT_FILTERS = {
   atmosphereMeda: false, // TES dust index
   hazards: false, // operational field hazards (boulder, soft soil)
   shelters: false, // shelters + 40-min return ring
-  composition: null // Scientist only: 'maf' | 'car' | 'phy' (CRISM 18 m/px) | 'tes' (regional)
+  composition: null, // Scientist only: 'maf' | 'car' | 'phy' (CRISM 18 m/px) | 'tes' (regional)
+  routeHistory: false, // past EVA tracks, coloured by outcome (Scientist, Mission Control)
+  validatedTerrain: false // stretches walked by the crew, with the trafficability they found
 };
 
 // Layer toggles offered to each role in the map header: [filter key, label, hint]
@@ -363,9 +354,11 @@ const L_REACHABLE = ['reachable', 'Reachable area', 'Area within a 40-min walk o
 const L_SLOPE = ['topographySlope', 'Slope & not-evaluated zones', 'MOLA+HRSC hillshade, >15° slope segments (red) and not-evaluated zones (amber)'];
 const L_HAZARDS = ['hazards', 'Field hazards', 'Operational hazards reported in the field: boulders and soft soil'];
 const L_SHELTERS = ['shelters', 'Shelters & 40-min ring', 'SEP shelters and the line within a 40-min walk of each of them'];
+const L_HISTORY = ['routeHistory', 'Route history', 'Past EVA tracks coloured by outcome (completed / partial / aborted). Click a track for date, pair, real vs planned duration and POIs reached'];
+const L_VALIDATED = ['validatedTerrain', 'Validated terrain', 'Trafficability validated in situ on the stretches the crew has walked (from the EVA debriefs)'];
 const LAYER_TOGGLES = {
-  scientist: [L_FUSION, L_THERMAL, L_TRAVERSE, L_UNCERTAINTY, L_REACHABLE],
-  control: [L_SLOPE, L_HAZARDS, L_SHELTERS, L_TRAVERSE],
+  scientist: [L_FUSION, L_THERMAL, L_TRAVERSE, L_UNCERTAINTY, L_REACHABLE, L_HISTORY, L_VALIDATED],
+  control: [L_SLOPE, L_HAZARDS, L_SHELTERS, L_HISTORY, L_VALIDATED, L_TRAVERSE],
   // Astronaut: no science layers (CRISM / mineralogy, Perseverance / PDS). Only what helps on the
   // ground: high-resolution base, approved route, POIs of the day, hazards, shelters + 40-min ring.
   astronaut: [
@@ -900,9 +893,21 @@ export default function MissionPlanner() {
   };
 
   // Toggle any of the 3 Simulated Role Filters manually
+  // Scenario selector: load a complete seed and reset every filter and selection
+  const handleLoadScenario = (id) => {
+    const sc = scenarioById(id);
+    planner.loadScenario(sc.id);
+    resetUi(sc.state.todaySol);
+    triggerToast(`${sc.label} loaded (simulated history). ${sc.summary}`);
+  };
+
   // "Reset demo" (user menu): seed data + default filters, so a stale browser state never dirties the demo
   const handleResetDemo = () => {
     planner.resetDemoData();
+    resetUi(planner.state.todaySol);
+    triggerToast(`Demo reset: ${scenarioById(planner.state.scenarioId).label} seed and default layers restored.`);
+  };
+  const resetUi = (todaySol) => {
     setActiveFilters({ ...DEFAULT_FILTERS });
     setSelectedMissionId(null);
     setSelectedPoiId(null);
@@ -910,11 +915,12 @@ export default function MissionPlanner() {
     setDraftPoint(null);
     setPickMode(false);
     setHighlightPts(null);
-    setAstronautSol(planner.state.todaySol);
+    setAstronautSol(todaySol);
+    setShowBriefing(false);
+    setShowDebrief(false);
     setRoleViews({ scientist: 'define', control: 'pois', astronaut: 'schedule' });
     mapInstanceRef.current?.closePopup();
     mapInstanceRef.current?.setView(JEZERO_CENTER, 14);
-    triggerToast('Demo reset: seed data and default layers restored.');
   };
 
   const handleToggleRoleFilter = (filterKey) => {
@@ -1380,6 +1386,50 @@ export default function MissionPlanner() {
         .addTo(analysisGroup);
     }
 
+    // 3c. Route history + trafficability validated in situ (Scientist, Mission Control)
+    if (analysisGroup && currentRole !== 'astronaut') {
+      if (activeFilters.validatedTerrain) {
+        planner.state.traffic.forEach((o) => {
+          const stl = TRAFFIC_STYLE[o.rating] ?? TRAFFIC_STYLE.expected;
+          L.polyline([o.a, o.b], { color: stl.color, weight: 9, opacity: 0.45, lineCap: 'butt' })
+            .bindTooltip(`Validated in situ · Sol ${o.sol} (${solDate(o.sol)}) · ${o.note ?? ''} · ${stl.label}`, { sticky: true })
+            .addTo(analysisGroup);
+        });
+      }
+      if (activeFilters.routeHistory) {
+        planner.state.evaHistory.forEach((eva) => {
+          const oc = EVA_OUTCOME[eva.outcome];
+          const latlngs = pastEvaPath(eva, planner.state.pois).map((pt) => [pt.lat, pt.lon]);
+          L.polyline(latlngs, { color: '#0b0f14', weight: 5.5, opacity: 0.55, interactive: false }).addTo(analysisGroup);
+          L.polyline(latlngs, { color: oc.color, weight: 3, opacity: 0.95, dashArray: eva.outcome === 'completed' ? null : eva.outcome === 'partial' ? '10, 6' : '3, 6' })
+            .bindTooltip(`Sol ${eva.sol} EVA · ${oc.label}`, { sticky: true })
+            .on('click', (ev) => {
+              L.DomEvent.stopPropagation(ev);
+              const r = (k, v) => (v ? `<div class="mh-poi-popup__row"><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd></div>` : '');
+              L.popup({ className: 'mh-leaflet-popup', maxWidth: 340, minWidth: 250 })
+                .setLatLng(ev.latlng)
+                .setContent(`
+                  <div class="mh-poi-popup">
+                    <div class="mh-poi-popup__head">
+                      <span class="mh-poi-popup__chip" style="background:${oc.color};color:#0b0f14">${oc.label}</span>
+                      <span class="mh-poi-popup__id">${escapeHtml(eva.id)} · simulated history</span>
+                    </div>
+                    <strong class="mh-poi-popup__title">Sol ${eva.sol} EVA · ${solDate(eva.sol)}</strong>
+                    <dl>
+                      ${r('EVA pair', eva.pair.join(' + '))}
+                      ${r('Plan', `${eva.planVersion} · ${eva.poiIds.join(' → ')}`)}
+                      ${r('POIs reached', eva.reached.length ? eva.reached.join(', ') : 'none')}
+                      ${r('Duration', `${eva.actualMin} min actual vs ${eva.plannedMin} min planned (${eva.actualMin - eva.plannedMin >= 0 ? '+' : '−'}${Math.abs(eva.actualMin - eva.plannedMin)} min)`)}
+                      ${r(eva.outcome === 'aborted' ? 'Abort reason' : 'Why partial', eva.reason)}
+                    </dl>
+                  </div>`)
+                .openOn(map);
+            })
+            .addTo(analysisGroup);
+        });
+      }
+    }
+
     // 4. Render Perseverance Reference Traverse & Waypoints
     const travGroup = vectorGroupsRef.current.traverse;
     travGroup.clearLayers();
@@ -1499,15 +1549,20 @@ export default function MissionPlanner() {
       const isSelected = selectedPoiId === poi.id;
       const icon = L.divIcon({
         className: '',
-        html: `<div class="mh-poi-flag${isSelected ? ' is-selected' : ''}">${flagSvg(flagColor(poi), order ? String(order) : '')}</div>`,
+        html: `<div class="mh-poi-flag${isSelected ? ' is-selected' : ''}">${flagSvg(flagColor(poi), order ? String(order) : '', 1, currentRole !== 'astronaut' && !!getHydration(poi).posterior)}</div>`,
         iconSize: [30, 36],
         iconAnchor: [5, 34], // foot of the pole on the coordinates
         tooltipAnchor: [12, -24]
       });
       L.marker([poi.lat, poi.lon], { icon, zIndexOffset: isSelected ? 1000 : 500 })
-        .bindTooltip(`${poi.id} · ${poi.name.split('(')[0].trim()}`, { direction: 'right' })
+        .bindTooltip(`${poi.id} · ${poi.name.split('(')[0].trim()}${poi.measuredAt && currentRole !== 'astronaut' ? ` · measured ${poi.measuredAt}` : ''}`, { direction: 'right' })
         .on('click', () => openPoiPopup(poi))
         .addTo(poiGroup);
+      // Follow-up target: thin link to the POI it was derived from
+      const parent = poi.parentId && visiblePois.find((x) => x.id === poi.parentId);
+      if (parent) {
+        L.polyline([[poi.lat, poi.lon], [parent.lat, parent.lon]], { color: '#ffffff', weight: 2, dashArray: '3, 5', opacity: 0.9, interactive: false }).addTo(poiGroup);
+      }
     });
 
     // Draft position of the POI the scientist is defining
@@ -1899,6 +1954,18 @@ export default function MissionPlanner() {
                 </button>
               );
             })()}
+            {/* Scenario: each one loads a complete (simulated) history and resets the filters */}
+            <label className="mh-scenario" title={scenarioById(planner.state.scenarioId).summary}>
+              <span>Scenario</span>
+              <select value={planner.state.scenarioId} onChange={(e) => handleLoadScenario(e.target.value)} aria-label="Scenario">
+                {SCENARIOS.map((sc) => (
+                  <option key={sc.id} value={sc.id}>
+                    {sc.label}
+                  </option>
+                ))}
+              </select>
+              <SimBadge label="simulated history" />
+            </label>
             {/* Signed-in user + role switcher (simulated users, no authentication yet) */}
             <UserMenu role={currentRole} onSelect={handleRoleSwitch} pendingMissions={pendingMissions} onResetDemo={handleResetDemo} />
           </div>
@@ -2124,11 +2191,11 @@ export default function MissionPlanner() {
                   type="button"
                   className="mh-btn"
                   onClick={() => {
-                    setRoleViews((prev) => (currentRole === 'scientist' ? { ...prev, scientist: 'discoveries' } : { ...prev, control: 'crew' }));
+                    setRoleViews((prev) => (currentRole === 'scientist' ? { ...prev, scientist: 'discoveries' } : { ...prev, control: 'log' }));
                     planner.dismissNotice(n.id, currentRole);
                   }}
                 >
-                  {currentRole === 'scientist' ? 'Open discoveries' : 'Open crew'}
+                  {currentRole === 'scientist' ? 'Open discoveries' : 'Open log'}
                 </button>
                 <button type="button" className="mh-btn mh-btn--icon" aria-label="Dismiss notification" onClick={() => planner.dismissNotice(n.id, currentRole)}>
                   <X className="w-4 h-4" />
@@ -2540,7 +2607,10 @@ function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe
                 {label}
               </LegendRow>
             ))}
-            <li className="text-mh-text2">Number = stop order · click a flag for geology</li>
+            <LegendRow swatch={<span className="w-3 h-3 rounded-full border-2 border-[#0b0f14]" style={{ background: '#56F000' }} aria-hidden="true" />}>
+              Green dot: measured in situ
+            </LegendRow>
+            <li className="text-mh-text2">Number = stop order · dotted link = follow-up target · click a flag for geology</li>
           </LegendSection>
 
           <LegendSection title="Base & route">
@@ -2614,6 +2684,23 @@ function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe
               <LegendRow swatch={<AreaSwatch stroke="#E5C04A" fill="#E5C04A" dash="5 3" />}>
                 Not evaluated — no safety claim
               </LegendRow>
+            </LegendSection>
+          )}
+
+          {notHud && activeFilters.routeHistory && (
+            <LegendSection title="Route history (simulated)">
+              <LegendRow swatch={<LineSwatch color="#56F000" width={3} />}>Completed EVA</LegendRow>
+              <LegendRow swatch={<LineSwatch color="#FCE83A" dash="6 4" width={3} />}>Partial EVA (terrain, time)</LegendRow>
+              <LegendRow swatch={<LineSwatch color="#FF3838" dash="2 4" width={3} />}>Aborted EVA (e.g. SEP)</LegendRow>
+              <li className="text-mh-text2">Click a track: date, pair, real vs planned duration, POIs reached</li>
+            </LegendSection>
+          )}
+          {notHud && activeFilters.validatedTerrain && (
+            <LegendSection title="Terrain validated in situ">
+              <LegendRow swatch={<LineSwatch color="#56F000" width={6} />}>Walked · as predicted</LegendRow>
+              <LegendRow swatch={<LineSwatch color="#2DCCFF" width={6} />}>Walked · easier (+15 % speed)</LegendRow>
+              <LegendRow swatch={<LineSwatch color="#FFB302" width={6} />}>Walked · harder (−30 % speed)</LegendRow>
+              <li className="text-mh-text2">From the EVA debriefs. Walked terrain no longer counts as “not evaluated”.</li>
             </LegendSection>
           )}
 

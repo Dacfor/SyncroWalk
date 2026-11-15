@@ -436,6 +436,28 @@ export const planMission = (mission: DailyMission, pois: Poi[], ctx: PlanContext
 };
 
 /**
+ * Track actually walked on a past EVA (route history layer): base → POIs reached → base.
+ * An aborted EVA turns back halfway to the POI it did not reach, via the field shelter if the
+ * crew sheltered there. Each EVA gets its own meander, like a recorded track.
+ */
+export const pastEvaPath = (eva: PastEva, pois: Poi[]): { lat: number; lon: number }[] => {
+  const at = (id: string) => pois.find((p) => p.id === id);
+  const pts: { lat: number; lon: number }[] = [BASE, ...eva.reached.map(at).filter((p): p is Poi => Boolean(p))];
+  const leg = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => terrainLeg(a, b, `${eva.id}:${a.lat},${a.lon}>${b.lat},${b.lon}`);
+  let path = pts.slice(1).flatMap((to, i) => leg(pts[i], to).slice(i === 0 ? 0 : 1));
+  if (!path.length) path = [BASE];
+  if (eva.outcome === 'aborted') {
+    const missed = at(eva.poiIds.find((id) => !eva.reached.includes(id)) ?? '');
+    if (missed) {
+      const out = leg(path[path.length - 1], missed);
+      path = [...path, ...out.slice(1, Math.ceil(out.length / 2))];
+    }
+    if (eva.viaShelter) path = [...path, ...leg(path[path.length - 1], FIELD_SHELTER).slice(1)];
+  }
+  return [...path, ...leg(path[path.length - 1], BASE).slice(1)];
+};
+
+/**
  * Plan of a mission with the shared context: field reports slow the route, the SEP alert
  * applies to today's EVA only, and the EVA pair must have dose budget left.
  */
@@ -452,7 +474,7 @@ export const planFor = (state: PlannerState, mission: DailyMission) =>
 
 // ── NO-GO → suggested replan ────────────────────────────────────────────────
 export const APPROVER = 'Flight Dir. M. Vance';
-export type ReplanStepCode = 'crew' | 'a' | 'b' | 'c' | 'd';
+export type ReplanStepCode = 'crew' | 'a' | 'b' | 'c' | 'd' | 'sci';
 export interface ReplanStep {
   code: ReplanStepCode;
   text: string;
