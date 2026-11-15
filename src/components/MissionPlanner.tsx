@@ -1396,24 +1396,23 @@ export default function MissionPlanner() {
         : currentRole === 'scientist'
           ? planner.state.fieldEvents.filter((fe) => fe.id === shownFeId)
           : [];
+    // Compact marker (◆ id); the description (class, e.g. "soft-soil", details) opens in a popup on click
     visibleFieldEvents.forEach((fe) => {
-      const color = (FIELD_EVENT_META[fe.class] ?? FIELD_EVENT_META['formation-interest']).color;
-
-      const feHtml = `
-        <div style="display:flex;align-items:center;gap:6px;background:var(--mh-card);color:${color};border:2px solid ${color};padding:2px 10px;border-radius:999px;font-family:var(--mh-font-mono);font-size:12px;font-weight:500;white-space:nowrap;box-shadow:0 2px 10px rgba(0,0,0,0.35);">
-          <span>◆ ${fe.id}</span>
-          <span style="color:var(--mh-text);">[${fe.class}]</span>
-          <span>${Math.round(fe.confidence * 100)}%</span>
-        </div>
-      `;
-      const icon = L.divIcon({
-        className: '',
-        html: feHtml,
-        iconSize: [165, 24],
-        iconAnchor: [82, 12]
-      });
-
-      L.marker([fe.lat, fe.lon], { icon }).bindTooltip(fe.title, { direction: 'top' }).addTo(feGroup);
+      const meta = FIELD_EVENT_META[fe.class] ?? FIELD_EVENT_META['formation-interest'];
+      L.marker([fe.lat, fe.lon], {
+        zIndexOffset: 600,
+        keyboard: true,
+        alt: `${fe.id} · ${meta.label}`,
+        icon: L.divIcon({
+          className: '',
+          html: `<div class="mh-fe-marker" style="--fe-color:${meta.color}"><span aria-hidden="true">◆</span>${escapeHtml(fe.id)}</div>`,
+          iconSize: null
+        })
+      })
+        // Hover: the type, like the POI flags show their name
+        .bindTooltip(`${fe.id} · ${meta.label} (${fe.class})`, { direction: 'right', offset: [72, 0] }) // past the right edge of the ◆ label (centred on the point)
+        .on('click', () => openFieldEventPopup(fe))
+        .addTo(feGroup);
     });
 
     // 7. Points of interest as flags coloured by priority (click → geology & mission popup).
@@ -1676,6 +1675,43 @@ export default function MissionPlanner() {
   const showFeOnMainMap = (fe) => {
     setShownFeId(fe ? fe.id : null);
     if (fe) mapInstanceRef.current?.panTo([fe.lat, fe.lon], { animate: true });
+  };
+
+  // Popup for a field discovery on the main map (map-level: survives marker redraws)
+  const openFieldEventPopup = (fe) => {
+    const map = mapInstanceRef.current;
+    const L = window.L;
+    if (!map || !L) return;
+    const meta = FIELD_EVENT_META[fe.class] ?? FIELD_EVENT_META['formation-interest'];
+    const row = (k, v) => (v ? `<div class="mh-poi-popup__row"><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd></div>` : '');
+    const html = `
+      <div class="mh-poi-popup">
+        <div class="mh-poi-popup__head">
+          <span class="mh-poi-popup__chip" style="background:${meta.color};color:#0b0f14">${escapeHtml(meta.label)} · ${escapeHtml(fe.class)}</span>
+          <span class="mh-poi-popup__id">${escapeHtml(fe.id)}</span>
+        </div>
+        <strong class="mh-poi-popup__title">${escapeHtml(fe.title)}</strong>
+        <dl>
+          ${row('Description', fe.description)}
+          ${row('Status', fe.status === 'confirmed' ? 'Confirmed' : 'Needs review')}
+          ${row('Confidence', `${Math.round(fe.confidence * 100)}% (demo value)`)}
+          ${row('Logged', fe.ts)}
+          ${row('Source', fe.source)}
+          ${row('Field directive', fe.actionDirective)}
+        </dl>
+      </div>`;
+    L.popup({
+      className: 'mh-leaflet-popup',
+      maxWidth: 340,
+      minWidth: 260,
+      maxHeight: 360,
+      offset: [0, -10],
+      autoPanPaddingTopLeft: [window.innerWidth >= 640 ? 300 : 24, 24],
+      autoPanPaddingBottomRight: [72, 24]
+    })
+      .setLatLng([fe.lat, fe.lon])
+      .setContent(html)
+      .openOn(map);
   };
 
   const openPoiPopup = (poi) => {
