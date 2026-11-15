@@ -33,6 +33,8 @@ import AstronautPanel from './planner/AstronautPanel.tsx';
 import { DiscoveryDetail, DiscoveryList } from './planner/Discoveries.tsx';
 import UserMenu from './planner/UserMenu.tsx';
 import ScenarioMenu from './planner/ScenarioMenu.tsx';
+import logoUrl from '../logo/logo.png';
+import logoNameUrl from '../logo/logo_name.png';
 import EvaBriefing from './planner/Briefing.tsx';
 import EvaDebrief from './planner/Debrief.tsx';
 import { scenarioById } from './planner/scenarios/index.ts';
@@ -1996,11 +1998,11 @@ export default function MissionPlanner() {
         <div className="px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
           {/* Left: Brand */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-mh-accent flex items-center justify-center font-mono font-medium text-sm text-white">
-              SW
-            </div>
-            <div className="flex flex-col">
-              <strong className="text-lg tracking-[0.02em] leading-tight">SYNCROWALK</strong>
+            <img src={logoUrl} alt="" className="h-11 w-auto shrink-0" />
+            <div className="flex flex-col gap-0.5">
+              <h1 className="m-0 leading-none">
+                <img src={logoNameUrl} alt="SyncroWalk" className="h-6 w-auto block" />
+              </h1>
               <span className="font-mono text-[13px] text-mh-nav-text2">
                 EVA Mission Planner · Jezero Crater
               </span>
