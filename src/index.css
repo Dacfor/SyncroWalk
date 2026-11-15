@@ -3,15 +3,10 @@
    Loaded into the "components" layer so Tailwind utilities can still override it. */
 @import './styles/mission-hub.css' layer(components);
 
-/* dark: same logic as Mission Hub (forced data-theme, otherwise the device setting) */
+/* dark is the default theme: everything except <html data-theme="light"> */
 @custom-variant dark {
-  &:where([data-theme='dark'], [data-theme='dark'] *) {
+  &:where(:root:not([data-theme='light']), :root:not([data-theme='light']) *) {
     @slot;
-  }
-  @media (prefers-color-scheme: dark) {
-    &:where(:root:not([data-theme='light']), :root:not([data-theme='light']) *) {
-      @slot;
-    }
   }
 }
 
@@ -20,6 +15,9 @@
 @theme inline {
   --font-sans: var(--mh-font);
   --font-mono: var(--mh-font-mono);
+  /* Base text 13 px (operations console density) */
+  --text-base: 13px;
+  --text-base--line-height: 1.45;
 
   --color-mh-bg: var(--mh-bg);
   --color-mh-card: var(--mh-card);
@@ -45,6 +43,8 @@
   --color-mh-accent-text: var(--mh-accent-text);
   --color-mh-ok: var(--mh-ok);
   --color-mh-ok-bg: var(--mh-ok-bg);
+  --color-mh-watch: var(--mh-watch);
+  --color-mh-watch-bg: var(--mh-watch-bg);
   --color-mh-warn: var(--mh-warn);
   --color-mh-warn-bg: var(--mh-warn-bg);
   --color-mh-crit: var(--mh-crit);
@@ -88,17 +88,21 @@ body,
 .leaflet-tooltip {
   background: var(--mh-card);
   color: var(--mh-text);
-  border: none;
+  border: 1px solid var(--mh-sep);
   border-radius: var(--mh-radius-xs);
-  box-shadow: var(--mh-shadow), 0 4px 14px rgba(0, 0, 0, 0.18);
-  font-family: var(--mh-font-mono);
+  box-shadow: none;
+  font: 400 12px var(--mh-font-mono);
+  padding: 2px 6px;
+}
+.leaflet-tooltip::before {
+  display: none;
 }
 .syncrowalk-tooltip {
   background: var(--mh-card) !important;
   color: var(--mh-text) !important;
-  border: 2px solid var(--mh-accent) !important;
-  border-radius: var(--mh-radius-pill) !important;
-  padding: 4px 10px !important;
+  border: 1px solid var(--mh-text2) !important;
+  border-radius: 2px !important;
+  padding: 1px 6px !important;
   font-family: var(--mh-font-mono) !important;
   font-size: 12px !important;
   font-weight: 500 !important;
@@ -121,9 +125,11 @@ body,
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
-  border-radius: var(--mh-radius-md);
-  background: #b3261e;
+  padding: 6px 10px;
+  border-radius: var(--mh-radius-sm);
+  border: 1px solid #ff3838;
+  border-left-width: 4px;
+  background: #5c1216;
   color: #ffffff;
 }
 .mh-nogo .mh-btn {
@@ -132,17 +138,18 @@ body,
 }
 /* Suggested / applied replan */
 .mh-replan {
-  padding: 14px 16px;
-  border-radius: var(--mh-radius-md);
+  padding: 8px 10px;
+  border-radius: var(--mh-radius-sm);
   border: 1px solid var(--mh-primary);
-  background: var(--mh-fill-blue);
+  background: color-mix(in srgb, var(--mh-fill-blue) 55%, var(--mh-card));
 }
 .mh-step-code {
-  font: 500 12px/1.7 var(--mh-font-mono);
+  font: 500 12px/1.6 var(--mh-font-mono);
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  padding: 0 6px;
-  border-radius: 3px;
+  padding: 0 5px;
+  border-radius: 2px;
+  border: 1px solid var(--mh-sep);
   background: var(--mh-card);
   color: var(--mh-text2);
   white-space: nowrap;
@@ -170,25 +177,26 @@ body,
   align-items: center;
   gap: 8px;
   min-height: var(--mh-touch);
-  padding: 0 6px 0 16px;
-  border-radius: var(--mh-radius-pill);
+  padding: 0 2px 0 8px;
+  border: 1px solid var(--mh-sep);
+  border-radius: var(--mh-radius-sm);
   background: var(--mh-fill);
   color: var(--mh-text2);
-  font: 600 15px/1.2 var(--mh-font);
+  font: 600 13px/1.2 var(--mh-font);
 }
 .mh-layer-select.is-on {
-  background: var(--mh-primary-soft);
-  color: var(--mh-link);
+  border-color: var(--mh-primary);
+  color: var(--mh-text);
 }
 .mh-layer-select select {
-  min-height: 32px;
-  max-width: 250px;
+  min-height: 22px;
+  max-width: 230px;
   border: 0;
-  border-radius: var(--mh-radius-pill);
+  border-radius: 2px;
   background: var(--mh-card);
   color: var(--mh-text);
-  font: 500 14px var(--mh-font);
-  padding: 0 8px;
+  font: 500 13px var(--mh-font);
+  padding: 0 4px;
 }
 
 /* POI flags: colour = priority, number = visit order */
@@ -216,11 +224,11 @@ body,
 .mh-sim-badge {
   display: inline-flex;
   align-items: center;
-  padding: 0 7px;
-  border-radius: var(--mh-radius-pill);
-  border: 1px dashed var(--mh-warn);
-  color: var(--mh-warn);
-  font: 500 11px/1.6 var(--mh-font-mono);
+  padding: 0 6px;
+  border-radius: 2px;
+  border: 1px dashed var(--mh-text2);
+  color: var(--mh-text2);
+  font: 500 12px/1.5 var(--mh-font-mono);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   white-space: nowrap;
@@ -231,15 +239,15 @@ body,
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 12px;
-  border-radius: var(--mh-radius-pill);
-  background: var(--mh-card);
-  color: var(--mh-text);
-  border: 2px solid var(--fe-color);
-  font: 500 13px var(--mh-font-mono);
+  padding: 1px 6px;
+  border-radius: 2px;
+  background: #101923;
+  color: #ffffff;
+  border: 1px solid var(--fe-color);
+  border-left-width: 4px;
+  font: 500 12px var(--mh-font-mono);
   white-space: nowrap;
   cursor: pointer;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
   transform: translate(-50%, -50%);
   transition: transform var(--mh-dur) var(--mh-ease);
 }
@@ -250,7 +258,7 @@ body,
   background: var(--fe-color);
   color: #0b0f14;
   transform: translate(-50%, -50%) scale(1.15);
-  box-shadow: 0 0 0 3px #ffffff, 0 4px 14px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 0 0 2px #ffffff;
 }
 .mh-fe-marker.is-selected > span {
   color: inherit;
@@ -261,16 +269,17 @@ body,
 .mh-leaflet-popup .leaflet-popup-tip {
   background: var(--mh-card);
   color: var(--mh-text);
-  box-shadow: var(--mh-shadow), 0 6px 20px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 0 0 1px var(--mh-sep);
 }
 .mh-leaflet-popup .leaflet-popup-content-wrapper {
   border-radius: var(--mh-radius-sm);
 }
 .mh-leaflet-popup .leaflet-popup-content {
-  margin: 14px 16px;
+  margin: 10px 12px;
   font-family: var(--mh-font);
   font-size: 13px;
   line-height: 1.4;
+  font-variant-numeric: tabular-nums;
 }
 .mh-leaflet-popup a.leaflet-popup-close-button {
   color: var(--mh-text2);
@@ -288,8 +297,8 @@ body,
   padding-right: 14px;
 }
 .mh-poi-popup__chip {
-  padding: 2px 8px;
-  border-radius: var(--mh-radius-pill);
+  padding: 1px 6px;
+  border-radius: 2px;
   color: #ffffff;
   font-weight: 700;
   font-size: 12px;
@@ -297,11 +306,11 @@ body,
 .mh-poi-popup__id,
 .mh-poi-popup__src {
   font-family: var(--mh-font-mono);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--mh-text2);
 }
 .mh-poi-popup__title {
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.25;
 }
 .mh-poi-popup dl {
@@ -312,8 +321,8 @@ body,
 }
 .mh-poi-popup__row dt {
   font-family: var(--mh-font-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.06em;
+  font-size: 12px;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--mh-text2);
 }
@@ -356,8 +365,8 @@ body,
   grid-template-columns: 170px minmax(0, 1fr);
 }
 .mh-kv dt {
-  font: 500 11px/1.6 var(--mh-font-mono);
-  letter-spacing: 0.06em;
+  font: 500 12px/1.5 var(--mh-font-mono);
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--mh-text2);
 }
@@ -412,21 +421,22 @@ body,
   align-items: center;
   gap: 8px;
   min-height: var(--mh-touch);
-  padding: 0 10px;
-  border-radius: var(--mh-radius-pill);
+  padding: 0 6px 0 8px;
+  border: 1px solid var(--mh-sep);
+  border-radius: var(--mh-radius-sm);
   background: var(--mh-nav-fill);
   color: var(--mh-nav-text2);
-  font: 500 13px var(--mh-font-mono);
+  font: 600 12px var(--mh-font);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.1em;
 }
 .mh-scenario select {
-  min-height: 30px;
+  min-height: 22px;
   border: 0;
-  border-radius: 3px;
-  background: #0b0f14;
+  border-radius: 2px;
+  background: #101923;
   color: #ffffff;
-  font: 600 14px var(--mh-font);
+  font: 600 13px var(--mh-font);
   text-transform: none;
   letter-spacing: 0;
   padding: 0 6px;
@@ -436,8 +446,8 @@ body,
 }
 .mh-log-table .mh-pill {
   margin: 2px 0;
-  font-size: 11px;
-  padding: 1px 6px;
+  font-size: 12px;
+  padding: 0 6px;
 }
 
 /* Debrief form */
@@ -569,6 +579,241 @@ body,
   .break-inside-avoid {
     break-inside: avoid;
   }
+}
+
+/* ── Operations-console pieces (Astro UXDS look) ──────────────────────────── */
+html,
+body {
+  font-size: 13px;
+}
+.mh-stat-label {
+  font: 500 12px/1.3 var(--mh-font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mh-text2);
+}
+/* Tab strip of each role */
+.mh-tabs {
+  display: flex;
+  background: var(--mh-head);
+  border: 1px solid var(--mh-sep);
+  border-radius: var(--mh-radius-lg);
+  overflow: hidden;
+}
+.mh-tab {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 32px;
+  padding: 2px 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 0;
+  border-right: 1px solid var(--mh-sep);
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--mh-text2);
+  font: 600 12px/1.2 var(--mh-font);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mh-tab > span:not(.mh-count) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mh-tab:last-child {
+  border-right: 0;
+}
+.mh-tab svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+.mh-tab:hover {
+  color: var(--mh-text);
+}
+.mh-tab[aria-selected='true'] {
+  background: var(--mh-card);
+  color: var(--mh-text);
+  border-bottom-color: var(--mh-primary);
+}
+/* Counter (tab badges, header counters) */
+.mh-count {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 2px;
+  background: var(--mh-primary);
+  color: var(--mh-on-primary);
+  font: 600 12px/16px var(--mh-font-mono);
+  text-align: center;
+}
+/* Check box of toggles */
+.mh-check {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+}
+.mh-check.is-on {
+  background: var(--mh-primary);
+  border-color: var(--mh-primary);
+  color: var(--mh-on-primary);
+}
+.mh-check svg {
+  width: 11px;
+  height: 11px;
+  stroke-width: 3;
+}
+.mh-toggle {
+  background: var(--mh-fill);
+  color: var(--mh-text2);
+  border-color: var(--mh-sep);
+  font-weight: 500;
+}
+.mh-toggle.is-on {
+  color: var(--mh-text);
+  border-color: var(--mh-primary);
+}
+/* Diamond glyph of field-event markers (drawn, not a text character) */
+.mh-diamond {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  background: var(--fe-color, currentColor);
+  transform: rotate(45deg);
+}
+/* Fixed status bar at the bottom of the console */
+.mh-statusbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-height: 26px;
+  padding: 0 4px;
+  background: var(--mh-nav);
+  color: var(--mh-nav-text2);
+  border-top: 1px solid var(--mh-sep);
+  font: 400 12px/1.2 var(--mh-font-mono);
+  font-variant-numeric: tabular-nums;
+  overflow-x: auto;
+  white-space: nowrap;
+  position: sticky;
+  bottom: 0;
+  z-index: 40;
+}
+.mh-statusbar > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-right: 1px solid var(--mh-sep);
+  min-height: 26px;
+}
+.mh-statusbar > span:last-child {
+  border-right: 0;
+  margin-left: auto;
+}
+.mh-statusbar b {
+  font-weight: 500;
+  color: var(--mh-nav-text);
+}
+.mh-statusbar i {
+  font-style: normal;
+  font-family: var(--mh-font);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+/* Astro status symbols, used wherever a state is shown without a pill */
+.mh-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.mh-status::before {
+  content: '';
+  flex: none;
+  width: 9px;
+  height: 9px;
+  background: currentColor;
+  border-radius: 50%;
+}
+.mh-status--normal {
+  color: var(--mh-normal);
+}
+.mh-status--caution {
+  color: var(--mh-caution);
+}
+.mh-status--caution::before {
+  border-radius: 1px;
+}
+.mh-status--serious {
+  color: var(--mh-serious);
+}
+.mh-status--serious::before {
+  border-radius: 0;
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
+.mh-status--critical {
+  color: var(--mh-critical);
+}
+.mh-status--critical::before {
+  border-radius: 0;
+  clip-path: polygon(50% 5%, 100% 95%, 0 95%);
+}
+.mh-status--standby {
+  color: var(--mh-standby);
+}
+.mh-status--standby::before {
+  background: transparent;
+  border: 2px solid currentColor;
+  box-sizing: border-box;
+}
+.mh-status--off {
+  color: var(--mh-off);
+}
+.mh-status--off::before {
+  background: transparent;
+  border: 1.5px solid currentColor;
+  box-sizing: border-box;
+}
+[data-theme='light'] .mh-status--normal { color: #0b6b12; }
+[data-theme='light'] .mh-status--caution { color: #6b5a00; }
+[data-theme='light'] .mh-status--serious { color: #8a5300; }
+[data-theme='light'] .mh-status--critical { color: #b0191b; }
+[data-theme='light'] .mh-status--standby { color: #00627f; }
+/* The global bars stay dark in the light theme: keep the bright status colours there */
+.mh-statusbar .mh-status.mh-status--normal { color: #56f000; }
+.mh-statusbar .mh-status.mh-status--caution { color: #fce83a; }
+.mh-statusbar .mh-status.mh-status--serious { color: #ffb302; }
+.mh-statusbar .mh-status.mh-status--critical { color: #ff5c5c; }
+.mh-statusbar .mh-status.mh-status--standby { color: #2dccff; }
+.mh-statusbar .mh-status.mh-status--off { color: #a4abb6; }
+.mh-navbar .mh-sim-badge {
+  color: var(--mh-nav-text2);
+  border-color: var(--mh-nav-text2);
+}
+.mh-navbar .mh-btn {
+  border-color: var(--mh-sep);
+}
+
+.mh-gonogo {
+  border: 1px solid currentColor;
+  border-left-width: 4px;
+}
+
+/* Leaflet controls: never below 12 px */
+.leaflet-container .leaflet-control-attribution,
+.leaflet-container .leaflet-control-scale-line {
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 /* Range sliders tinted with the theme */
