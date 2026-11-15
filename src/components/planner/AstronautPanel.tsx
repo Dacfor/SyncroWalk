@@ -1,6 +1,6 @@
-import { AlertTriangle, Backpack, CalendarDays, CheckCircle2, Clock, FileText, MapPin } from 'lucide-react';
+import { AlertTriangle, Backpack, CalendarDays, CheckCircle2, ClipboardCheck, Clock, FileText, MapPin } from 'lucide-react';
 import { Card, PanelTabs, Stat, TabPanel } from './ui.tsx';
-import { PRIORITY_META, TODAY_SOL, instrumentName, missionVersion, planFor } from './model.ts';
+import { PRIORITY_META, instrumentName, missionVersion, planFor } from './model.ts';
 import { DEMO_ASSUMPTIONS as A, TIME_WINDOW, addMinutesToLst, bearingDeg, compassPoint, distKm, lstToMin } from './analysis.ts';
 import { SimBadge } from './analysisUi.tsx';
 import type { Poi } from './model.ts';
@@ -24,6 +24,7 @@ export default function AstronautPanel({
   view,
   setView,
   onOpenBriefing,
+  onOpenDebrief,
   onReportAnomaly
 }: {
   store: PlannerStore;
@@ -33,16 +34,17 @@ export default function AstronautPanel({
   view: AstronautView;
   setView: (v: AstronautView) => void;
   onOpenBriefing: () => void;
+  onOpenDebrief: () => void;
   onReportAnomaly: (at: { lat: number; lon: number; name: string }) => void;
 }) {
   const { state } = store;
   // Drafts are not visible until mission control sends them
   const visible = state.missions.filter((m) => m.status !== 'draft').sort((a, b) => a.sol - b.sol);
-  const sols = [...new Set([TODAY_SOL, ...visible.map((m) => m.sol)])].sort((a, b) => a - b);
+  const sols = [...new Set([state.todaySol, ...visible.map((m) => m.sol)])].sort((a, b) => a - b);
   const mission = visible.find((m) => m.sol === selectedSol) ?? null;
   const plan = mission ? planFor(state, mission) : null;
   const packed = mission ? state.packed[mission.id] ?? [] : [];
-  const isToday = selectedSol === TODAY_SOL;
+  const isToday = selectedSol === state.todaySol;
   const packedCount = plan ? packed.filter((p) => plan.equipment.includes(p)).length : 0;
 
   // Mini-HUD (demo position model): the crew is at the last measured stop, or at the base
@@ -72,7 +74,7 @@ export default function AstronautPanel({
       </span>
       <span className="flex flex-wrap gap-2">
         {!isToday && (
-          <button type="button" className="mh-btn mh-btn--tinted !min-h-11" onClick={() => setSelectedSol(TODAY_SOL)}>
+          <button type="button" className="mh-btn mh-btn--tinted !min-h-11" onClick={() => setSelectedSol(state.todaySol)}>
             Back to today
           </button>
         )}
@@ -125,7 +127,7 @@ export default function AstronautPanel({
                   >
                     <strong className="text-base">
                       Sol {sol}
-                      {sol === TODAY_SOL ? ' · Today' : ''}
+                      {sol === state.todaySol ? ' · Today' : ''}
                     </strong>
                     <span className="text-base text-mh-text2">
                       {m ? `${m.startTime} · ${m.poiIds.length} stop${m.poiIds.length === 1 ? "" : "s"}` : 'No EVA'}
@@ -134,7 +136,7 @@ export default function AstronautPanel({
                 );
               })}
             </div>
-            {sols.some((s) => s < TODAY_SOL) && (
+            {sols.some((s) => s < state.todaySol) && (
               <p className="m-0 text-base text-mh-text2">Past Sols are kept for reference.</p>
             )}
           </Card>
@@ -201,14 +203,28 @@ export default function AstronautPanel({
                       </span>
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <button type="button" onClick={onOpenBriefing} className="mh-btn mh-btn--primary mh-btn--lg !min-h-14">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <button type="button" onClick={onOpenBriefing} className="mh-btn mh-btn--primary mh-btn--lg !min-h-14 !px-3">
                       <FileText className="w-5 h-5" /> EVA briefing
                     </button>
-                    <button type="button" onClick={reportHere} className="mh-btn mh-btn--danger mh-btn--lg !min-h-14">
+                    <button type="button" onClick={reportHere} className="mh-btn mh-btn--danger mh-btn--lg !min-h-14 !px-3">
                       <AlertTriangle className="w-5 h-5" /> Report anomaly
                     </button>
+                    <button
+                      type="button"
+                      onClick={onOpenDebrief}
+                      disabled={!!mission.debriefId}
+                      className="mh-btn mh-btn--tinted mh-btn--lg !min-h-14 !px-3"
+                      title="Mandatory after the EVA"
+                    >
+                      <ClipboardCheck className="w-5 h-5" /> {mission.debriefId ? 'Debrief sent' : 'EVA debrief'}
+                    </button>
                   </div>
+                  {mission.debriefId && (
+                    <p className="m-0 text-base text-mh-text2">
+                      Debrief {mission.debriefId} submitted: the Scientist and Mission Control have your observations, terrain ratings and dosimeter reading.
+                    </p>
+                  )}
                 </section>
               )}
               {view === 'schedule' && (

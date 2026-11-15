@@ -145,9 +145,24 @@ const localSlopeFeature = (pt) =>
 const isSoftSoil = (pt, fieldEvents, A) =>
   fieldEvents.some((f) => f.class === 'soft-soil' && distKm(pt, [f.lat, f.lon]) <= A.softSoilRadiusKm);
 
-// Walking speed multiplier at a point (slope feature, soft soil, not-evaluated terrain)
-const terrainSpeedFactor = (pt, slopeDeg, fieldEvents, A) => {
+// Trafficability validated in situ: stretches the crew has walked, rated in the EVA debrief
+// (easier / as expected / harder than predicted). The latest observation within 50 m wins.
+export const TRAFFIC_FACTOR = { easier: 1.15, expected: 1, harder: 0.7 };
+export const TRAFFIC_RADIUS_KM = 0.05;
+export const trafficAt = (pt, traffic = []) => {
+  let hit = null;
+  traffic.forEach((o) => {
+    if (distToSegmentKm(pt, o.a, o.b) <= TRAFFIC_RADIUS_KM) hit = o;
+  });
+  return hit;
+};
+
+// Walking speed multiplier at a point (slope feature, soft soil, not-evaluated terrain).
+// Where the terrain was validated in situ, the measured factor replaces the orbital guess.
+const terrainSpeedFactor = (pt, slopeDeg, fieldEvents, A, traffic = []) => {
   let f = Math.max(0.3, 1 - A.slopeSpeedLossPerDeg * slopeDeg);
+  const walked = trafficAt(pt, traffic);
+  if (walked) return f * walked.factor;
   if (isSoftSoil(pt, fieldEvents, A)) f *= A.softSoilSpeedFactor;
   if (inNotEvaluated(pt)) f *= A.notEvaluatedSpeedFactor;
   return f;
@@ -171,7 +186,7 @@ export const timeToShelterMin = (pt, fieldEvents, A = DEMO_ASSUMPTIONS) => {
  */
 export const computeMissionMetrics = (waypoints, legs, stopPois, startLst, ctx = {}) => {
   const A = DEMO_ASSUMPTIONS;
-  const { fieldEvents = [], sepAlert = false } = ctx;
+  const { fieldEvents = [], sepAlert = false, traffic = [] } = ctx;
   const wps = waypoints.map((p) => [p.lat, p.lon]);
   const legsXY = legs.map((leg) => leg.map((p) => [p.lat, p.lon]));
   const elevAt = (i) => molaElevationEstimate(wps[i][0], wps[i][1]);
@@ -183,6 +198,7 @@ export const computeMissionMetrics = (waypoints, legs, stopPois, startLst, ctx =
   let walkMin = 0;
   let stationMin = 0;
   let neKm = 0;
+  let validatedKm = 0;
   let steepKm = 0;
   let maxSlopeDeg = 0;
   let maxSlopeName = 'MOLA gradient';
@@ -216,9 +232,10 @@ export const computeMissionMetrics = (waypoints, legs, stopPois, startLst, ctx =
         maxSlopeDeg = slope;
         maxSlopeName = feature && feature.slopeDeg >= profileSlope ? feature.name : 'MOLA gradient';
       }
-      const ne = inNotEvaluated(mid);
-      const soft = isSoftSoil(mid, fieldEvents, A);
-      const speed = A.walkSpeedKmhFlat * terrainSpeedFactor(mid, slope, fieldEvents, A);
+      const walked = trafficAt(mid, traffic);
+      const ne = inNotEvaluated(mid) && !walked; // walked terrain is no longer "not evaluated"
+      const soft = walked ? walked.rating === 'harder' : isSoftSoil(mid, fieldEvents, A);
+      const speed = A.walkSpeedKmhFlat * terrainSpeedFactor(mid, slope, fieldEvents, A, traffic);
       const segMin = (d / speed) * 60;
       const watts = (A.metabolicWalkFlatW + A.metabolicPerSlopeDegW * slope) * (soft || ne ? A.softTerrainMetabolicFactor : 1);
       energyKJ += (watts * segMin * 60) / 1000;
@@ -230,6 +247,7 @@ export const computeMissionMetrics = (waypoints, legs, stopPois, startLst, ctx =
       walkMin += segMin;
       t += segMin;
       if (ne) neKm += d;
+      if (walked) validatedKm += d;
       if (slope > A.slopeLimitDeg) steepKm += d;
       maxShelterMin = Math.max(maxShelterMin, timeToShelterMin(mid, fieldEvents, A));
       raw.push({ distKm: distanceKm, elev, slope, ne, soft, steep: slope > A.slopeLimitDeg, a: p, b: q });
@@ -290,6 +308,7 @@ export const computeMissionMetrics = (waypoints, legs, stopPois, startLst, ctx =
     steepKm,
     neKm,
     nePct: distanceKm ? (neKm / distanceKm) * 100 : 0,
+    validatedPct: distanceKm ? (validatedKm / distanceKm) * 100 : 0,
     maxTimeToShelterMin: maxShelterMin,
     viaShelter: stopPois.some((p) => p?.isShelter),
     gainM,

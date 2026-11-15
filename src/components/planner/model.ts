@@ -2,6 +2,7 @@ import {
   BASE,
   DEMO_ASSUMPTIONS,
   SHELTERS,
+  TRAFFIC_FACTOR,
   TIME_WINDOW,
   computeMissionMetrics,
   evaluateConstraints,
@@ -46,6 +47,10 @@ export interface Poi {
   };
   orbitalPrior?: { uncertainty: string; mineral?: string; hydrationEst?: string };
   geologicalUnit?: string;
+  /** Follow-up target derived from another POI (e.g. POI-2b, closer sampling) */
+  parentId?: string;
+  /** When the in-situ measurement was taken, e.g. "Sol 2 · 11:05 LST" */
+  measuredAt?: string;
 }
 
 export interface DailyMission {
@@ -66,6 +71,78 @@ export interface DailyMission {
   viaShelterAfter?: number | null;
   /** The last replan applied to this mission (before / after comparison) */
   replan?: ReplanRecord;
+  /** Id of the post-EVA debrief, once the crew has submitted it */
+  debriefId?: string;
+}
+
+// ── Post-EVA debrief (astronaut → scientist, mission control) ────────────────
+export type PoiOutcome = 'completed' | 'partial' | 'skipped';
+export type TrafficRating = 'easier' | 'expected' | 'harder';
+export interface DebriefPoi {
+  poiId: string;
+  status: PoiOutcome;
+  reason: string;
+  samples: { id: string; collected: boolean; note: string }[];
+  observation: string;
+  proposePoi: boolean;
+}
+export interface DebriefLeg {
+  from: string;
+  to: string;
+  a: [number, number];
+  b: [number, number];
+  rating: TrafficRating;
+}
+export interface Debrief {
+  id: string;
+  missionId: string;
+  sol: number;
+  planVersion: number;
+  pois: DebriefPoi[];
+  legs: DebriefLeg[];
+  actualMin: number;
+  borg: number; // perceived exertion, Borg 6–20
+  suitIssues: string;
+  dust: 'none' | 'light' | 'heavy';
+  dosimeterMsv: number;
+  tlx: { mental: number; physical: number; temporal: number }; // simplified NASA-TLX, 0–100
+  psych: string;
+  signedBy: string;
+  signedAt: string;
+}
+
+/** A stretch walked by the crew, with the trafficability they found. */
+export interface TrafficObs {
+  a: [number, number];
+  b: [number, number];
+  rating: TrafficRating;
+  factor: number;
+  sol: number;
+  note?: string;
+}
+
+/** A past EVA (route history layer). */
+export interface PastEva {
+  id: string;
+  sol: number;
+  pair: string[]; // names
+  planVersion: string;
+  poiIds: string[]; // planned
+  reached: string[];
+  outcome: 'completed' | 'partial' | 'aborted';
+  plannedMin: number;
+  actualMin: number;
+  reason?: string; // why it was cut short
+  viaShelter?: boolean; // the crew went to the field shelter
+}
+
+/** Notification shown in the other roles' views (e.g. "Sol N debrief received"). */
+export interface Notice {
+  id: string;
+  sol: number;
+  title: string;
+  text: Partial<Record<Role, string>>;
+  seenBy: Role[];
 }
 
 // Mission log: one line per decision, with the evidence that drove it
@@ -91,11 +168,21 @@ export interface PlannerState {
   sepAlert: boolean; // scripted SEP / DONKI alert (demo switch in Mission Control)
   crew: CrewMember[]; // crew status (simulated telemetry); dose is updated by the EVA debriefs
   log: LogEntry[]; // mission log (plan versions, evidence, decisions)
+  todaySol: number; // "today" of the loaded scenario
+  scenarioId: string;
+  debriefs: Debrief[];
+  traffic: TrafficObs[]; // trafficability validated in situ
+  evaHistory: PastEva[]; // past EVAs (route history)
+  notices: Notice[];
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
 export { BASE } from './analysis.ts';
-export const TODAY_SOL = 24;
+export const TODAY_SOL = 24; // "today" of the default scenario; use state.todaySol everywhere else
+// Sol → Earth date (simulated landing date; 1 sol = 1.02749 days)
+export const LANDING_DATE = '2039-08-02';
+export const solDate = (sol: number) =>
+  new Date(Date.parse(`${LANDING_DATE}T00:00:00Z`) + (sol - 1) * 1.0274912517 * 86400000).toISOString().slice(0, 10);
 export const WALK_SPEED_KMH = DEMO_ASSUMPTIONS.walkSpeedKmhFlat; // flat-ground speed; terrain slows it down
 export const LATEST_RETURN = TIME_WINDOW.latestReturn; // demo parameter: latest return to base (LST)
 export const DAYLIGHT = { start: '08:00', end: '16:00' };
@@ -215,6 +302,7 @@ export interface MissionPlan {
 
 export interface PlanContext {
   fieldEvents?: FieldEvent[];
+  traffic?: TrafficObs[];
   sepAlert?: boolean;
   pair?: { id: string; name: string; doseActualMsv: number }[]; // EVA pair, for the dose-budget check
   sol?: number;
@@ -354,7 +442,8 @@ export const planMission = (mission: DailyMission, pois: Poi[], ctx: PlanContext
 export const planFor = (state: PlannerState, mission: DailyMission) =>
   planMission(mission, state.pois, {
     fieldEvents: state.fieldEvents,
-    sepAlert: state.sepAlert && mission.sol === TODAY_SOL,
+    traffic: state.traffic,
+    sepAlert: state.sepAlert && mission.sol === state.todaySol,
     pair: crewAssignment(state.crew, mission)
       .filter((c) => c.seatNow === 'EV1' || c.seatNow === 'EV2')
       .map((c) => ({ id: c.id, name: c.name, doseActualMsv: c.doseActualMsv })),
@@ -673,6 +762,12 @@ export const SEED_STATE: PlannerState = {
   measured: [],
   sepAlert: false,
   crew: [], // filled below with CREW_ROSTER (declared after the seed)
+  todaySol: TODAY_SOL,
+  scenarioId: 'demo',
+  debriefs: [],
+  traffic: [],
+  evaHistory: [],
+  notices: [],
   log: [
     {
       id: 'LOG-024-1',
@@ -831,3 +926,129 @@ export const crewAssignment = (crew: CrewMember[], mission?: Pick<DailyMission, 
 };
 
 SEED_STATE.crew = CREW_ROSTER;
+
+// ── Post-EVA debrief → shared state ──────────────────────────────────────────
+// Pure: returns the new state. Observations become field events for the Scientist, the
+// trafficability updates the route model on the stretches walked, the dosimeter reading
+// updates the crew dose, the log gets "Sol N debrief received", the other roles get a notice.
+export const applyDebrief = (state: PlannerState, d: Debrief): PlannerState => {
+  const mission = state.missions.find((m) => m.id === d.missionId);
+  if (!mission) return state;
+  const plan = planFor(state, mission);
+  const pad = (n: number, len = 3) => String(n).padStart(len, '0');
+  const pairIds = crewAssignment(state.crew, mission)
+    .filter((c) => c.seatNow.startsWith('EV'))
+    .map((c) => c.id);
+
+  // Observations → field events (the Scientist's discoveries)
+  const observed = d.pois.filter((x) => x.observation.trim());
+  const newEvents: FieldEvent[] = observed.map((x, i) => {
+    const poi = state.pois.find((pp) => pp.id === x.poiId);
+    return {
+      id: `FE-${pad(d.sol)}-${pad(state.fieldEvents.filter((f) => f.id.startsWith(`FE-${pad(d.sol)}-`)).length + i + 1)}`,
+      ts: `Sol ${d.sol} · debrief ${d.signedAt}`,
+      source: `EVA debrief · ${d.signedBy}`,
+      method: 'crew observation',
+      class: 'formation-interest',
+      title: x.proposePoi ? `Proposed POI near ${x.poiId}: ${x.observation.trim().slice(0, 48)}` : `Observation at ${x.poiId}`,
+      confidence: 0.8,
+      lat: (poi?.lat ?? BASE.lat) + 0.00035,
+      lon: (poi?.lon ?? BASE.lon) + 0.0004,
+      photo: `VISORCAM_${d.id}_${x.poiId}`,
+      description: x.observation.trim(),
+      actionDirective: x.proposePoi ? 'The crew proposes a new point of interest here.' : 'For the Scientist to review.',
+      status: x.proposePoi ? 'proposed' : 'needs review'
+    };
+  });
+
+  // Trafficability → route model on the stretches walked
+  const newTraffic: TrafficObs[] = d.legs.map((l) => ({
+    a: l.a,
+    b: l.b,
+    rating: l.rating,
+    factor: TRAFFIC_FACTOR[l.rating],
+    sol: d.sol,
+    note: `${l.from} → ${l.to}`
+  }));
+  const harder = d.legs.filter((l) => l.rating === 'harder');
+  const easier = d.legs.filter((l) => l.rating === 'easier');
+
+  // Dose and crew status
+  const crew = state.crew.map((c) =>
+    pairIds.includes(c.id)
+      ? {
+          ...c,
+          doseActualMsv: Math.round((c.doseActualMsv + d.dosimeterMsv) * 100) / 100,
+          evasCompleted: c.evasCompleted + 1,
+          fatigue: (d.borg >= 15 ? 'High' : d.borg >= 12 ? 'Moderate' : 'Low') as CrewMember['fatigue'],
+          psych: `${d.psych || 'Nominal'} (Sol ${d.sol} debrief)`
+        }
+      : c
+  );
+
+  const done = d.pois.filter((x) => x.status === 'completed').map((x) => x.poiId);
+  const partial = d.pois.filter((x) => x.status !== 'completed');
+  const samples = d.pois.flatMap((x) => x.samples.filter((sm) => sm.collected));
+  const outcome: PastEva['outcome'] = partial.length ? 'partial' : 'completed';
+  const proposed = observed.filter((x) => x.proposePoi).length;
+  const terrain = harder.length
+    ? `terrain harder than predicted on ${harder.length} leg${harder.length === 1 ? '' : 's'} (${harder.map((l) => `${l.from} → ${l.to}`).join(', ')})`
+    : easier.length
+      ? `terrain easier than predicted on ${easier.length} leg${easier.length === 1 ? '' : 's'}`
+      : 'terrain as predicted';
+
+  return {
+    ...state,
+    debriefs: [...state.debriefs, d],
+    fieldEvents: [...state.fieldEvents, ...newEvents],
+    traffic: [...state.traffic, ...newTraffic],
+    crew,
+    measured: [...new Set([...state.measured, ...done])],
+    missions: state.missions.map((m) => (m.id === d.missionId ? { ...m, debriefId: d.id } : m)),
+    evaHistory: [
+      ...state.evaHistory,
+      {
+        id: `EVA-${pad(d.sol)}`,
+        sol: d.sol,
+        pair: crewAssignment(state.crew, mission)
+          .filter((c) => c.seatNow.startsWith('EV'))
+          .map((c) => c.name),
+        planVersion: `v${d.planVersion}`,
+        poiIds: plan.stops.map((x) => x.id),
+        reached: d.pois.filter((x) => x.status !== 'skipped').map((x) => x.poiId),
+        outcome,
+        plannedMin: plan.metrics.evaDurationMin,
+        actualMin: d.actualMin,
+        reason: partial.map((x) => `${x.poiId} ${x.status}${x.reason ? `: ${x.reason}` : ''}`).join('; ') || undefined,
+        viaShelter: plan.metrics.viaShelter
+      }
+    ],
+    log: [
+      ...state.log,
+      {
+        id: `LOG-${pad(d.sol)}-${state.log.length + 1}`,
+        sol: d.sol,
+        ts: `Sol ${d.sol} · ${d.signedAt}`,
+        type: harder.length || d.suitIssues.trim() ? 'safety' : 'science',
+        planVersion: `v${d.planVersion}`,
+        evidence: `Sol ${d.sol} debrief received: ${done.length}/${d.pois.length} POIs completed, ${samples.length} sample${samples.length === 1 ? '' : 's'}, ${terrain}, dosimeter ${d.dosimeterMsv.toFixed(2)} mSv, Borg ${d.borg}${d.suitIssues.trim() ? `, suit: ${d.suitIssues.trim()}` : ''}`,
+        decision: `${newEvents.length} observation${newEvents.length === 1 ? '' : 's'} sent to the Scientist${proposed ? ` (${proposed} proposed POI)` : ''}; route model updated on ${d.legs.length} leg${d.legs.length === 1 ? '' : 's'}; crew dose updated`,
+        approvedBy: d.signedBy,
+        outcome: `EVA ${outcome} in ${d.actualMin} min (planned ${plan.metrics.evaDurationMin})`
+      }
+    ],
+    notices: [
+      ...state.notices,
+      {
+        id: `N-${d.id}`,
+        sol: d.sol,
+        title: `Sol ${d.sol} debrief received`,
+        text: {
+          scientist: `${newEvents.length} new observation${newEvents.length === 1 ? '' : 's'} in Discoveries${proposed ? `, ${proposed} proposed as a new POI` : ''}; ${done.length} target${done.length === 1 ? '' : 's'} measured, ${samples.length} sample${samples.length === 1 ? '' : 's'} collected.`,
+          control: `Route model updated: ${terrain}. EVA pair dose +${d.dosimeterMsv.toFixed(2)} mSv each. Exertion Borg ${d.borg}${d.suitIssues.trim() ? `; suit issue: ${d.suitIssues.trim()}` : ''}.`
+        },
+        seenBy: []
+      }
+    ]
+  };
+};

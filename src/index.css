@@ -406,6 +406,75 @@ body,
   border-color: var(--mh-ok);
 }
 
+/* Debrief form */
+.mh-choice {
+  display: inline-flex;
+  border: 1px solid var(--mh-sep);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.mh-choice > button {
+  min-height: 28px;
+  padding: 2px 10px;
+  border: 0;
+  border-right: 1px solid var(--mh-sep);
+  background: transparent;
+  color: var(--mh-text2);
+  font: 500 13px var(--mh-font);
+  cursor: pointer;
+}
+.mh-choice > button:last-child {
+  border-right: 0;
+}
+.mh-choice > button[aria-checked='true'] {
+  background: var(--mh-primary);
+  color: var(--mh-on-primary);
+  font-weight: 600;
+}
+.mh-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+.mh-field > span,
+.mh-field-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--mh-text2);
+}
+.mh-debrief-poi {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--mh-sep);
+  border-radius: 3px;
+  background: var(--mh-fill);
+}
+.mh-debrief-poi .mh-input {
+  background: var(--mh-card);
+}
+/* Notification from another role */
+.mh-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--mh-info);
+  border-left-width: 4px;
+  border-radius: 3px;
+  background: var(--mh-info-bg);
+  color: var(--mh-text);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.mh-notice .mh-btn {
+  background: var(--mh-card);
+  color: var(--mh-text);
+}
+
 /* EVA briefing: clean print of the briefing window only (window.print) */
 @media print {
   @page {

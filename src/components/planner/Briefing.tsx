@@ -5,7 +5,6 @@ import {
   BASE,
   FIELD_EVENT_META,
   SEAT_LABEL,
-  TODAY_SOL,
   crewAssignment,
   instrumentName,
   isHazard,
@@ -150,7 +149,7 @@ export default function EvaBriefing({
               </span>
               <h2 id="briefing-title" className="m-0 text-[22px] leading-tight font-bold">
                 EVA Briefing · Sol {mission.sol}
-                {mission.sol === TODAY_SOL ? ' (today)' : ''}
+                {mission.sol === state.todaySol ? ' (today)' : ''}
               </h2>
             </div>
             <p className="m-0 text-base text-mh-text2">
@@ -331,8 +330,8 @@ export default function EvaBriefing({
               <dl className="mh-kv-list">
                 <KV k="Turn back by" v={turnBackLst ? `${turnBackLst} LST` : '—'} />
                 <KV k="Back in base by" v={`${TIME_WINDOW.latestReturn} LST`} />
-                <KV k="Max EVA time" v={`${state.sepAlert && mission.sol === TODAY_SOL ? A.sepEvaMaxMin : TIME_WINDOW.evaMaxMin} min (plan ${m.evaDurationMin})`} />
-                <KV k="Max time to shelter" v={`${state.sepAlert && mission.sol === TODAY_SOL ? A.sepShelterMaxMin : A.sepMinWarningMin} min (route ${Math.round(m.maxTimeToShelterMin)})`} />
+                <KV k="Max EVA time" v={`${state.sepAlert && mission.sol === state.todaySol ? A.sepEvaMaxMin : TIME_WINDOW.evaMaxMin} min (plan ${m.evaDurationMin})`} />
+                <KV k="Max time to shelter" v={`${state.sepAlert && mission.sol === state.todaySol ? A.sepShelterMaxMin : A.sepMinWarningMin} min (route ${Math.round(m.maxTimeToShelterMin)})`} />
                 <KV k="Max EVA dose" v={`${A.evaDoseLimitMsv} mSv (plan ${m.doseEvaMsv.toFixed(2)})`} />
                 <KV k="Slope limit" v={`${A.slopeLimitDeg}° (route ${m.maxSlopeDeg.toFixed(1)}°)`} />
                 <KV k="Suit reserve" v={`${A.suitReservePct} % (plan ends at ${Math.round(m.consumablesRemainingPct)} %)`} />

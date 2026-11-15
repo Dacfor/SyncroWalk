@@ -39,7 +39,8 @@ import {
   Sun,
   Moon,
   SunMoon,
-  ChevronDown
+  ChevronDown,
+  Bell
 } from 'lucide-react';
 import { usePlannerStore } from './planner/usePlannerStore.ts';
 import ScientistPanel from './planner/ScientistPanel.tsx';
@@ -48,8 +49,9 @@ import AstronautPanel from './planner/AstronautPanel.tsx';
 import { DiscoveryDetail, DiscoveryList } from './planner/Discoveries.tsx';
 import UserMenu from './planner/UserMenu.tsx';
 import EvaBriefing from './planner/Briefing.tsx';
+import EvaDebrief from './planner/Debrief.tsx';
 import { COMPOSITION_LAYERS, CompositionMenu, compositionLayer } from './planner/LayerMenus.tsx';
-import { BASE, FIELD_EVENT_META, PRIORITY_META, SEAT_LABEL, TODAY_SOL, crewAssignment, instrumentName, isHazard, planFor } from './planner/model.ts';
+import { BASE, FIELD_EVENT_META, PRIORITY_META, SEAT_LABEL, crewAssignment, instrumentName, isHazard, planFor } from './planner/model.ts';
 import {
   DEMO_ASSUMPTIONS,
   MISSION_OBJECTIVE,
@@ -774,7 +776,7 @@ export default function MissionPlanner() {
   // 6. Shared mission-planning store (POIs, daily missions) used by all three users
   const planner = usePlannerStore();
   const [selectedMissionId, setSelectedMissionId] = useState(null); // mission control editor
-  const [astronautSol, setAstronautSol] = useState(TODAY_SOL); // astronaut calendar day
+  const [astronautSol, setAstronautSol] = useState(planner.state.todaySol); // astronaut calendar day
   const [pickMode, setPickMode] = useState(false); // scientist: next map click sets the POI position
   const [draftPoint, setDraftPoint] = useState(null); // scientist: position of the POI being defined
   const mapClickRef = useRef(null);
@@ -908,7 +910,7 @@ export default function MissionPlanner() {
     setDraftPoint(null);
     setPickMode(false);
     setHighlightPts(null);
-    setAstronautSol(TODAY_SOL);
+    setAstronautSol(planner.state.todaySol);
     setRoleViews({ scientist: 'define', control: 'pois', astronaut: 'schedule' });
     mapInstanceRef.current?.closePopup();
     mapInstanceRef.current?.setView(JEZERO_CENTER, 14);
@@ -1417,7 +1419,7 @@ export default function MissionPlanner() {
     // Control: the mission being edited, otherwise the route of the day
     const mapMission =
       currentRole === 'control'
-        ? (plannerMissions.find((m) => m.id === selectedMissionId) ?? plannerMissions.find((m) => m.sol === TODAY_SOL))
+        ? (plannerMissions.find((m) => m.id === selectedMissionId) ?? plannerMissions.find((m) => m.sol === planner.state.todaySol))
         : currentRole === 'astronaut'
           ? plannerMissions.find((m) => m.sol === astronautSol && m.status !== 'draft')
           : null;
@@ -1706,7 +1708,7 @@ export default function MissionPlanner() {
     if (!map || !L) return;
     const m =
       currentRole === 'control'
-        ? (planner.state.missions.find((x) => x.id === selectedMissionId) ?? planner.state.missions.find((x) => x.sol === TODAY_SOL))
+        ? (planner.state.missions.find((x) => x.id === selectedMissionId) ?? planner.state.missions.find((x) => x.sol === planner.state.todaySol))
         : currentRole === 'astronaut'
           ? planner.state.missions.find((x) => x.sol === astronautSol && x.status !== 'draft')
           : null;
@@ -1725,7 +1727,7 @@ export default function MissionPlanner() {
   // Astronaut "Report anomaly": a new field discovery for the Scientist that also slows
   // the Mission Control route model (soft soil within 80 m of the report)
   const handleReportAnomaly = (at) => {
-    const sol = TODAY_SOL;
+    const sol = planner.state.todaySol;
     const fes = planner.state.fieldEvents;
     let n = fes.length + 1;
     let id = `FE-0${sol}-${String(n).padStart(3, '0')}`;
@@ -1822,7 +1824,7 @@ export default function MissionPlanner() {
   const pendingMissions = planner.state.missions.filter((m) => m.status !== 'sent').length;
   const mapRouteVisible =
     currentRole === 'control'
-      ? !!(planner.state.missions.find((m) => m.id === selectedMissionId) ?? planner.state.missions.find((m) => m.sol === TODAY_SOL))?.poiIds.length
+      ? !!(planner.state.missions.find((m) => m.id === selectedMissionId) ?? planner.state.missions.find((m) => m.sol === planner.state.todaySol))?.poiIds.length
       : currentRole === 'astronaut'
         ? !!planner.state.missions.find((m) => m.sol === astronautSol && m.status !== 'draft')?.poiIds.length
         : false;
@@ -2108,6 +2110,31 @@ export default function MissionPlanner() {
           className={`flex flex-col gap-5 sm:gap-6 min-w-0 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:pb-2 ${mapExpanded ? 'lg:hidden' : ''}`}
           aria-label="Decision panel"
         >
+          {/* Notifications from the other roles (e.g. "Sol N debrief received") */}
+          {planner.state.notices
+            .filter((n) => n.text[currentRole] && !n.seenBy.includes(currentRole))
+            .map((n) => (
+              <div key={n.id} className="mh-notice" role="status">
+                <Bell className="w-5 h-5 shrink-0" aria-hidden="true" />
+                <div className="flex-1 min-w-0 flex flex-col">
+                  <strong>{n.title}</strong>
+                  <span>{n.text[currentRole]}</span>
+                </div>
+                <button
+                  type="button"
+                  className="mh-btn"
+                  onClick={() => {
+                    setRoleViews((prev) => (currentRole === 'scientist' ? { ...prev, scientist: 'discoveries' } : { ...prev, control: 'crew' }));
+                    planner.dismissNotice(n.id, currentRole);
+                  }}
+                >
+                  {currentRole === 'scientist' ? 'Open discoveries' : 'Open crew'}
+                </button>
+                <button type="button" className="mh-btn mh-btn--icon" aria-label="Dismiss notification" onClick={() => planner.dismissNotice(n.id, currentRole)}>
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
           {currentRole === 'scientist' && (
             <ScientistPanel
               store={planner}
@@ -2157,6 +2184,7 @@ export default function MissionPlanner() {
               view={roleViews.astronaut}
               setView={setRoleView('astronaut')}
               onOpenBriefing={() => setShowBriefing(true)}
+              onOpenDebrief={() => setShowDebrief(true)}
               onReportAnomaly={handleReportAnomaly}
             />
           )}
@@ -2173,6 +2201,20 @@ export default function MissionPlanner() {
           onOpenDebrief={() => {
             setShowBriefing(false);
             setShowDebrief(true);
+          }}
+        />
+      )}
+
+      {/* EVA DEBRIEF (Astronaut): mandatory form after the EVA; feeds the Scientist and Mission Control */}
+      {showDebrief && briefingMission && (
+        <EvaDebrief
+          state={planner.state}
+          mission={briefingMission}
+          onClose={() => setShowDebrief(false)}
+          onSubmit={(d) => {
+            planner.submitDebrief(d);
+            setShowDebrief(false);
+            triggerToast(`Sol ${d.sol} debrief submitted: Scientist and Mission Control have been notified.`);
           }}
         />
       )}
@@ -2360,7 +2402,7 @@ export default function MissionPlanner() {
               </button>
             </div>
             <pre className="m-0 p-4 rounded-mh-md bg-mh-fill text-base font-mono overflow-auto flex-1 select-text">
-              {JSON.stringify({ base: BASE, todaySol: TODAY_SOL, ...planner.state }, null, 2)}
+              {JSON.stringify({ base: BASE, ...planner.state }, null, 2)}
             </pre>
             <button
               type="button"

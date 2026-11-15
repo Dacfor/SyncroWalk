@@ -3,7 +3,7 @@ import type { FormEvent } from 'react';
 import { Crosshair, FlaskConical, Gem, Lightbulb, List, Map as MapIcon, MapPin, MapPinPlus, Pencil, PlusCircle, Trash2 } from 'lucide-react';
 import { DiscoveryDetail, DiscoveryList } from './Discoveries.tsx';
 import { Card, Label, PanelTabs, Segmented, TabPanel } from './ui.tsx';
-import { FIELD_EVENT_META, INTEREST_TYPES, PRIORITY_META, TODAY_SOL, planFor } from './model.ts';
+import { FIELD_EVENT_META, INTEREST_TYPES, PRIORITY_META, planFor } from './model.ts';
 import {
   CONSTRAINT_STATUS,
   DEMO_ASSUMPTIONS as A,
@@ -183,7 +183,7 @@ export default function ScientistPanel({
     }
     // Not scheduled: cost of adding it as a detour to the next mission with stops
     const next = [...state.missions]
-      .filter((m) => m.sol >= TODAY_SOL && m.poiIds.length)
+      .filter((m) => m.sol >= state.todaySol && m.poiIds.length)
       .sort((a, b) => a.sol - b.sol)[0];
     if (!next) return { text: 'Not scheduled yet · no upcoming mission to compare with', status: 'ok' };
     const plan = planFor(state, next);

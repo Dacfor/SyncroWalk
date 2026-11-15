@@ -36,7 +36,6 @@ import {
   INSTRUMENTS,
   PRIORITY_META,
   STANDARD_EQUIPMENT,
-  TODAY_SOL,
   FIELD_SHELTER_NAME,
   missionVersion,
   planFor,
@@ -103,9 +102,9 @@ export default function ControlPanel({
   const toPrioritise = pois.filter((p) => !p.priority).length;
 
   // Crew status (simulated): EVA crew is "out" when today's mission has been sent with stops
-  const todaySent = state.missions.find((m) => m.sol === TODAY_SOL && m.status !== 'draft' && m.poiIds.length > 0);
+  const todaySent = state.missions.find((m) => m.sol === state.todaySol && m.status !== 'draft' && m.poiIds.length > 0);
   // Seats refer to the mission being edited, otherwise to today's mission
-  const seatMission = mission ?? state.missions.find((m) => m.sol === TODAY_SOL) ?? null;
+  const seatMission = mission ?? state.missions.find((m) => m.sol === state.todaySol) ?? null;
   const crew = crewAssignment(state.crew, seatMission).map((c) => {
     const evaCrew = c.seatNow === 'EV1' || c.seatNow === 'EV2';
     const doseDeltaMsv = c.doseActualMsv - c.dosePlannedMsv;
@@ -116,11 +115,11 @@ export default function ControlPanel({
         : c.fatigue !== 'Low' || doseDeltaMsv > 0
           ? { label: 'Monitor', cls: 'mh-pill--warn' }
           : { label: 'Nominal', cls: 'mh-pill--ok' };
-    const remainingEvas = remainingEvasByDose(c.doseActualMsv, TODAY_SOL);
-    return { ...c, evaCrew, doseDeltaMsv, doseDeltaPct, health, remainingEvas, onEvaToday: evaCrew && !!todaySent && seatMission?.sol === TODAY_SOL };
+    const remainingEvas = remainingEvasByDose(c.doseActualMsv, state.todaySol);
+    return { ...c, evaCrew, doseDeltaMsv, doseDeltaPct, health, remainingEvas, onEvaToday: evaCrew && !!todaySent && seatMission?.sol === state.todaySol };
   });
   // Environment refers to the mission being edited, or today's
-  const envMission = mission ?? state.missions.find((m) => m.sol === TODAY_SOL) ?? null;
+  const envMission = mission ?? state.missions.find((m) => m.sol === state.todaySol) ?? null;
   const envPlan = envMission ? planFor(state, envMission) : null;
   const pendingNoGo = missions.filter((m) => m.status !== 'sent' && planFor(state, m).evaluation.overall === 'violated').length;
   const crewToWatch = crew.filter((c) => c.health.label !== 'Nominal').length;
@@ -315,7 +314,7 @@ export default function ControlPanel({
                   <span className="flex flex-wrap items-center justify-between gap-2">
                     <strong className="text-base">
                       Sol {m.sol}
-                      {m.sol === TODAY_SOL ? ' · Today' : ''} · plan v{missionVersion(m)}
+                      {m.sol === state.todaySol ? ' · Today' : ''} · plan v{missionVersion(m)}
                     </strong>
                     <span className="flex flex-wrap gap-2">
                       {p.stops.length > 0 && (
@@ -848,7 +847,7 @@ export default function ControlPanel({
                         </strong>
                         <span className="text-base text-mh-text2">
                           {SEAT_LABEL[c.seatNow]} · {c.role}
-                          {c.onEvaToday ? ` · on today’s EVA (Sol ${TODAY_SOL})` : ''}
+                          {c.onEvaToday ? ` · on today’s EVA (Sol ${state.todaySol})` : ''}
                         </span>
                       </span>
                       <span className={`mh-pill shrink-0 ${c.health.cls}`}>{c.health.label}</span>
@@ -910,7 +909,7 @@ export default function ControlPanel({
             eyebrow="Environment"
             title="EVA window & environment"
             icon={Radio}
-            subtitle={envMission ? `For the Sol ${envMission.sol} mission${envMission.sol === TODAY_SOL ? ' (today)' : ''}.` : 'No mission selected.'}
+            subtitle={envMission ? `For the Sol ${envMission.sol} mission${envMission.sol === state.todaySol ? ' (today)' : ''}.` : 'No mission selected.'}
             aside={<SimBadge />}
           >
             {envPlan && envPlan.stops.length > 0 && (() => {

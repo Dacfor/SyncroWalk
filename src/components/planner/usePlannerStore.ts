@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { APPROVER, SEED_STATE, missionVersion, newMissionId, nextPoiId, planFor, TODAY_SOL } from './model.ts';
+import { APPROVER, SEED_STATE, applyDebrief, missionVersion, newMissionId, nextPoiId, planFor } from './model.ts';
 import { marsLmst } from './analysis.ts';
-import type { DailyMission, FieldEvent, LogEntry, PlannerState, Poi, Priority, ReplanSuggestion } from './model.ts';
+import type { DailyMission, Debrief, FieldEvent, LogEntry, PlannerState, Poi, Priority, ReplanSuggestion, Role } from './model.ts';
 
 // Versioned key: bump it whenever the saved shape or the seed changes, so an old state
 // left in the browser can never leak into the demo.
@@ -28,7 +28,7 @@ const load = (): PlannerState => {
 // One more line in the mission log (newest last)
 const withLog = (s: PlannerState, entry: Omit<LogEntry, 'id' | 'ts'> & { ts?: string }): LogEntry[] => [
   ...s.log,
-  { ts: `Sol ${TODAY_SOL} · ${marsLmst()} LST`, ...entry, id: `LOG-${String(entry.sol).padStart(3, '0')}-${s.log.length + 1}` }
+  { ts: `Sol ${s.todaySol} · ${marsLmst()} LST`, ...entry, id: `LOG-${String(entry.sol).padStart(3, '0')}-${s.log.length + 1}` }
 ];
 
 // A NO-GO plan can never reach the astronauts
@@ -117,7 +117,7 @@ export function usePlannerStore() {
     addMission(): string {
       const id = newMissionId();
       const usedSols = new Set(state.missions.map((m) => m.sol));
-      let sol = TODAY_SOL;
+      let sol = state.todaySol;
       while (usedSols.has(sol)) sol++;
       setState((s) => ({
         ...s,
@@ -159,7 +159,7 @@ export function usePlannerStore() {
         const m = s.missions.find((x) => x.id === id);
         if (!m) return s;
         const { mission: next, ok: _ok, ...record } = r;
-        const ts = `Sol ${TODAY_SOL} · ${marsLmst()} LST`;
+        const ts = `Sol ${s.todaySol} · ${marsLmst()} LST`;
         return {
           ...s,
           missions: s.missions.map((x) =>
@@ -170,7 +170,7 @@ export function usePlannerStore() {
           log: withLog(s, {
             sol: m.sol,
             ts,
-            type: s.sepAlert && m.sol === TODAY_SOL ? 'safety' : 'replan',
+            type: s.sepAlert && m.sol === s.todaySol ? 'safety' : 'replan',
             planVersion: `v${r.fromVersion} → v${r.toVersion}`,
             evidence: `Plan v${r.fromVersion} NO-GO: ${r.reason}`,
             decision: r.steps.map((st) => st.text).join(' · '),
@@ -185,7 +185,7 @@ export function usePlannerStore() {
         ...s,
         sepAlert: on,
         log: withLog(s, {
-          sol: TODAY_SOL,
+          sol: s.todaySol,
           type: 'safety',
           planVersion: '—',
           evidence: on ? 'DONKI SEP alert (scripted): proton flux above 35 pfu expected' : 'DONKI: SEP alert cleared',
@@ -226,6 +226,17 @@ export function usePlannerStore() {
       setState((s) => ({
         ...s,
         measured: s.measured.includes(poiId) ? s.measured.filter((x) => x !== poiId) : [...s.measured, poiId]
+      }));
+    },
+
+    // Post-EVA debrief: observations → Scientist, trafficability → route model, dose → crew, log + notices
+    submitDebrief(d: Debrief) {
+      setState((s) => applyDebrief(s, d));
+    },
+    dismissNotice(id: string, role: Role) {
+      setState((s) => ({
+        ...s,
+        notices: s.notices.map((n) => (n.id === id && !n.seenBy.includes(role) ? { ...n, seenBy: [...n.seenBy, role] } : n))
       }));
     },
 
