@@ -778,6 +778,27 @@ export const SEED_STATE: PlannerState = {
       extraEquipment: ['Comms relay'],
       status: 'draft',
       version: 1
+    },
+    // Preset EVAs already sent to the crew (astronaut view: upcoming sols)
+    {
+      id: 'M-seed-26',
+      sol: 26,
+      startTime: '09:30',
+      poiIds: ['POI-2'],
+      extraEquipment: ['Spare battery pack', 'Water & nutrition'],
+      status: 'sent',
+      version: 1,
+      approvedBy: 'Flight Dir. M. Vance'
+    },
+    {
+      id: 'M-seed-27',
+      sol: 27,
+      startTime: '10:00',
+      poiIds: ['POI-1'],
+      extraEquipment: ['Navigation tablet'],
+      status: 'sent',
+      version: 1,
+      approvedBy: 'Flight Dir. M. Vance'
     }
   ],
   packed: {},

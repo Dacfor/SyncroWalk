@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ComponentType, KeyboardEvent, SVGProps } from 'react';
-import { Check, ChevronDown, Compass, RotateCcw, Sparkles } from 'lucide-react';
+import { Check, ChevronDown, Database, RotateCcw, FlaskConical, SquareTerminal } from 'lucide-react';
 import { AstronautIcon } from './icons.tsx';
 import type { Role } from './model.ts';
 
 export const ROLES: { id: Role; label: string; description: string; Icon: ComponentType<SVGProps<SVGSVGElement>> }[] = [
-  { id: 'scientist', label: 'Scientist', description: 'Defines points of interest', Icon: Sparkles },
-  { id: 'control', label: 'Mission Control', description: 'Plans routes and the calendar', Icon: Compass },
+  { id: 'scientist', label: 'Scientist', description: 'Defines points of interest', Icon: FlaskConical },
+  { id: 'control', label: 'Mission Control', description: 'Plans routes and the calendar', Icon: SquareTerminal },
   { id: 'astronaut', label: 'Astronaut', description: 'Follows the daily EVA', Icon: AstronautIcon }
 ];
 
@@ -18,12 +18,14 @@ export default function UserMenu({
   role,
   onSelect,
   pendingMissions,
-  onResetDemo
+  onResetDemo,
+  onOpenEvidence
 }: {
   role: Role;
   onSelect: (role: Role) => void;
   pendingMissions: number;
   onResetDemo: () => void;
+  onOpenEvidence: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -135,7 +137,23 @@ export default function UserMenu({
               </button>
             );
           })}
-          <div className="border-t border-mh-sep mt-1 pt-1">
+          <div className="border-t border-mh-sep mt-1 pt-1 flex flex-col gap-1">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onOpenEvidence();
+              }}
+              className="w-full min-h-11 px-3 py-2 rounded-mh-sm border-0 text-left cursor-pointer flex items-center gap-3 text-mh-text bg-transparent hover:bg-mh-fill"
+              title="NASA Trek, USGS & PDS sources of every map layer"
+            >
+              <Database className="w-5 h-5 shrink-0 text-mh-text2" aria-hidden="true" />
+              <span className="flex flex-col">
+                <span className="text-base font-semibold">Evidence</span>
+                <span className="text-base text-mh-text2">Data sources, resolution and limits</span>
+              </span>
+            </button>
             <button
               type="button"
               role="menuitem"

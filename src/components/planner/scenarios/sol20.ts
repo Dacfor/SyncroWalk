@@ -114,6 +114,30 @@ export const SOL20_STATE: PlannerState = {
       status: 'draft',
       version: 1,
       evaPair: ['CM4', 'CM3']
+    },
+    // Preset EVAs already sent to the crew (astronaut view: upcoming sols).
+    // Pair rotated away from Okafor, who has no dose budget left for an EVA.
+    {
+      id: 'M-s20-22',
+      sol: 22,
+      startTime: '09:30',
+      poiIds: ['POI-1b', 'POI-5'],
+      extraEquipment: ['Spare battery pack', 'Water & nutrition'],
+      status: 'sent',
+      version: 1,
+      approvedBy: APPROVER,
+      evaPair: ['CM4', 'CM3']
+    },
+    {
+      id: 'M-s20-23',
+      sol: 23,
+      startTime: '09:30',
+      poiIds: ['POI-4', 'POI-4b'],
+      extraEquipment: ['Navigation tablet', 'Comms relay'],
+      status: 'sent',
+      version: 1,
+      approvedBy: APPROVER,
+      evaPair: ['CM3', 'CM4']
     }
   ],
   fieldEvents: [

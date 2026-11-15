@@ -54,6 +54,27 @@ const state: PlannerState = {
       extraEquipment: ['Spare battery pack'],
       status: 'draft',
       version: 1
+    },
+    // Preset EVAs already sent to the crew (astronaut view: upcoming sols)
+    {
+      id: 'M-s3-5',
+      sol: 5,
+      startTime: '09:30',
+      poiIds: ['POI-2', 'POI-1'],
+      extraEquipment: ['Spare battery pack', 'Water & nutrition'],
+      status: 'sent',
+      version: 1,
+      approvedBy: APPROVER
+    },
+    {
+      id: 'M-s3-6',
+      sol: 6,
+      startTime: '10:00',
+      poiIds: ['POI-1'],
+      extraEquipment: ['Navigation tablet'],
+      status: 'sent',
+      version: 1,
+      approvedBy: APPROVER
     }
   ],
   fieldEvents: [

@@ -3,14 +3,10 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Layers,
   CheckCircle2,
-  FileJson,
   Crosshair,
-  Database,
   X,
   ZoomIn,
   ZoomOut,
-  PlusCircle,
-  Server,
   MapPin,
   Maximize2,
   Minimize2,
@@ -21,7 +17,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Thermometer,
-  Gem,
+  Microscope,
   Mountain,
   CircleDashed,
   Route,
@@ -36,9 +32,10 @@ import ControlPanel from './planner/ControlPanel.tsx';
 import AstronautPanel from './planner/AstronautPanel.tsx';
 import { DiscoveryDetail, DiscoveryList } from './planner/Discoveries.tsx';
 import UserMenu from './planner/UserMenu.tsx';
+import ScenarioMenu from './planner/ScenarioMenu.tsx';
 import EvaBriefing from './planner/Briefing.tsx';
 import EvaDebrief from './planner/Debrief.tsx';
-import { SCENARIOS, scenarioById } from './planner/scenarios/index.ts';
+import { scenarioById } from './planner/scenarios/index.ts';
 import LayerCategoryMenu, { COMPOSITION_LAYERS, compositionLayer } from './planner/LayerMenus.tsx';
 import { formatTemp } from './planner/ThemisTemperature.tsx';
 import { BASE, FIELD_EVENT_META, PRIORITY_META, instrumentName, isHazard, pastEvaPath, planFor, solDate } from './planner/model.ts';
@@ -51,7 +48,7 @@ import {
   residualLevel,
   shelterIsochrone
 } from './planner/analysis.ts';
-import { SimBadge, fmtNum } from './planner/analysisUi.tsx';
+import { fmtNum } from './planner/analysisUi.tsx';
 import {
   TEMPERATURE_STOPS,
   fetchThemisCatalog,
@@ -82,7 +79,6 @@ const JEZ_CTX_BOUNDS = [
 
 const MOLA_COG_URL =
   'https://asc-pds-services.s3.us-west-2.amazonaws.com/wms_basemaps3/Mars/MOLA/mola128_mola64_merge_90Nto90S_SimpleC_clon0_cog.tif';
-const M20_MMGIS_BASE = 'https://mars.nasa.gov/mmgis-maps/M20/Layers/json/';
 
 // THEMIS night IR colormap (cold → warm), shared by the SVG filter and the legend
 const THERMAL_RDBU_STOPS = ['#2166ac', '#67a9cf', '#f7f7f7', '#ef8a62', '#b2182b'];
@@ -396,6 +392,10 @@ const BASE_DEFAULT_ON = new Set(['viking', 'ctxGlobal', 'ctxJez', 'hiriseJez']);
 
 // Built-in fallback Perseverance traverse & Sol waypoints (Octavia E. Butler -> Séítah -> Three Forks -> Delta)
 // Used immediately while MMGIS JSON loads or if offline
+// Perseverance waypoints (MMGIS). mars.nasa.gov sends no CORS header: read through the Vite
+// proxy (/mmgis → https://mars.nasa.gov/mmgis-maps, see vite.config.ts; npm run dev / preview)
+const M20_WAYPOINTS_URL = `${import.meta.env.BASE_URL}mmgis/M20/Layers/json/M20_waypoints.json`;
+
 const FALLBACK_M20_WAYPOINTS = [
   { sol: 0, name: 'Octavia E. Butler Landing', lat: 18.4447, lon: 77.4508, elev: -2570 },
   { sol: 125, name: 'Crater Floor Fractured Rough', lat: 18.4362, lon: 77.4545, elev: -2574 },
@@ -621,9 +621,7 @@ export default function MissionPlanner() {
     tesDust: 0.5
   });
 
-  // 4. Proxy & Telemetry States (from index_2.html & map_2.py)
-  const [useFastApiProxy, setUseFastApiProxy] = useState(false);
-  const [proxyBaseUrl] = useState('http://localhost:8000/proxy?url=');
+  // 4. Telemetry state
   const [mapStatusLog, setMapStatusLog] = useState([
     'Initializing Jezero L.CRS.EPSG4326 map...',
     'Loaded PDS Analyst’s Notebook package (Séítah & Western Delta).'
@@ -655,7 +653,6 @@ export default function MissionPlanner() {
   const [roleViews, setRoleViews] = useState({ scientist: 'define', control: 'pois', astronaut: 'schedule' });
   const setRoleView = (role) => (view) => setRoleViews((prev) => ({ ...prev, [role]: view }));
   const [showEvidenceDrawer, setShowEvidenceDrawer] = useState(false);
-  const [showJsonModal, setShowJsonModal] = useState(false);
   const [toastMsg, setToastMsg] = useState(null);
   const [shownFeId, setShownFeId] = useState(null); // field discovery shown on the main map (scientist)
   const [selectedFeId, setSelectedFeId] = useState('FE-024-003'); // discovery selected in list / field map
@@ -710,7 +707,7 @@ export default function MissionPlanner() {
     },
     {
       label: 'Composition',
-      icon: Gem,
+      icon: Microscope,
       items: [
         ...catalogItems('Composition (orbital spectra)'),
         // CRISM MTRDR browse products (real PDS data, Scientist only): one at a time
@@ -1068,13 +1065,14 @@ export default function MissionPlanner() {
       // 6. Map Click Handler (Coordinates + Nearest Perseverance Sol + MOLA Elevation)
       map.on('click', (e) => {
         const { lat, lng } = e.latlng;
-        mapClickRef.current?.(lat, lng);
+        // true = the click set the scientist's draft POI (drawn by the layer sync, no extra pin)
+        const usedAsDraft = mapClickRef.current?.(lat, lng) === true;
         const nearest = findNearestPerseveranceSol(lat, lng);
         const molaZ = estimateJezeroMolaElevation(lat, lng);
 
         if (vectorGroupsRef.current.clickPin) {
           vectorGroupsRef.current.clickPin.clearLayers();
-          L.circleMarker([lat, lng], {
+          if (!usedAsDraft) L.circleMarker([lat, lng], {
             radius: 7,
             color: '#ffffff',
             weight: 2.5,
@@ -1101,30 +1099,25 @@ export default function MissionPlanner() {
       // 7. Perseverance waypoints from MMGIS (feed the timeline), with built-in PDS fallback.
       //    Only the waypoints are used: the timeline draws the rover position of the selected date.
       try {
-        const prefix = useFastApiProxy ? proxyBaseUrl : '';
-        const wpUrl = prefix
-          ? prefix + encodeURIComponent(M20_MMGIS_BASE + 'M20_waypoints.json')
-          : M20_MMGIS_BASE + 'M20_waypoints.json';
-        const wpRes = await fetch(wpUrl);
+        const wpRes = await fetch(M20_WAYPOINTS_URL);
         if (!wpRes.ok) throw new Error('MMGIS not reachable');
         const wpJson = await wpRes.json();
-        if (wpJson?.features?.length) {
-          waypointsRef.current = wpJson.features.map((f) => ({
-            sol: f.properties?.sol ?? 0,
-            name: f.properties?.name || `Sol ${f.properties?.sol ?? '?'}`,
-            lon: f.geometry.coordinates[0],
-            lat: f.geometry.coordinates[1],
-            elev: f.properties?.elev_geoid ?? -2550
-          }));
-          setM20Waypoints(waypointsRef.current);
-        }
+        if (!wpJson?.features?.length) throw new Error('No MMGIS waypoints');
+        waypointsRef.current = wpJson.features.map((f) => ({
+          sol: f.properties?.sol ?? 0,
+          name: f.properties?.name || `Sol ${f.properties?.sol ?? '?'}`,
+          lon: f.geometry.coordinates[0],
+          lat: f.geometry.coordinates[1],
+          elev: f.properties?.elev_geoid ?? -2550
+        }));
+        if (!isMounted) return;
+        setM20Waypoints(waypointsRef.current);
         setDataLink((d) => ({ ...d, mmgis: 'live' }));
         appendStatus(`Live MMGIS Perseverance waypoints loaded (${waypointsRef.current.length}).`);
-      } catch (err) {
-        setDataLink((d) => ({ ...d, mmgis: useFastApiProxy ? 'degraded' : 'built-in' }));
-        appendStatus(
-          'Using built-in PDS Perseverance waypoints (Octavia E. Butler → Séítah → Wildcat Ridge).'
-        );
+      } catch {
+        if (!isMounted) return;
+        setDataLink((d) => ({ ...d, mmgis: 'built-in' }));
+        appendStatus('Using built-in PDS Perseverance waypoints (Octavia E. Butler → Séítah → Wildcat Ridge).');
       }
     };
 
@@ -1852,14 +1845,18 @@ export default function MissionPlanner() {
   // ROLE-SPECIFIC MAP ACTIONS
   // ═══════════════════════════════════════════════════════════════════════════
   // The Leaflet click listener is registered once, so it calls whatever this ref holds
+  // Scientist: while the "Add / Edit point" form is open (or "Pick on map" is on), every click
+  // moves the draft POI, so the form always holds the LAST point selected on the map.
   useEffect(() => {
     mapClickRef.current = (lat, lon) => {
-      if (currentRole === 'scientist' && pickMode) {
-        setDraftPoint({ lat, lon });
-        setPickMode(false);
-      }
+      if (currentRole !== 'scientist') return false;
+      if (!pickMode && roleViews.scientist !== 'define') return false;
+      // "Pick on map" stays on: the scientist can keep moving the point until it is created
+      // (the form turns pick mode off on submit / cancel)
+      setDraftPoint({ lat, lon });
+      return true;
     };
-  }, [currentRole, pickMode]);
+  }, [currentRole, pickMode, roleViews.scientist]);
 
   // Frame the selected daily route (control: mission being edited; astronaut: selected Sol)
   useEffect(() => {
@@ -2010,35 +2007,8 @@ export default function MissionPlanner() {
             </div>
           </div>
 
-          {/* Right: CORS proxy toggle + EVIDENCE + mission.json + theme toggle + user menu (role switcher) */}
+          {/* Right: theme toggle + scenario menu + user menu (role switcher, evidence, reset) */}
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setUseFastApiProxy((prev) => !prev)}
-              aria-pressed={useFastApiProxy}
-              className="mh-btn bg-mh-nav-fill text-mh-nav-text !font-mono !text-[13px] !font-medium"
-              title="Toggle FastAPI CORS proxy (http://localhost:8000/proxy?url= from map_2.py)"
-            >
-              <Server className="w-4 h-4" />
-              {useFastApiProxy ? 'Proxy :8000 ON' : 'Direct CORS (Trek/USGS)'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowEvidenceDrawer(true)}
-              className="mh-btn bg-mh-nav-fill text-mh-nav-text"
-            >
-              <Database className="w-4 h-4" />
-              <span>Evidence</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowJsonModal(true)}
-              className="mh-btn mh-btn--icon bg-mh-nav-fill text-mh-nav-text"
-              title="Inspect the shared mission plan"
-              aria-label="Inspect the shared mission plan"
-            >
-              <FileJson className="w-4 h-4" />
-            </button>
             {(() => {
               // Single round toggle: Auto → Light → Dark → Auto
               const THEMES = {
@@ -2060,19 +2030,9 @@ export default function MissionPlanner() {
               );
             })()}
             {/* Scenario: each one loads a complete (simulated) history and resets the filters */}
-            <label className="mh-scenario" title={scenarioById(planner.state.scenarioId).summary}>
-              <span>Scenario</span>
-              <select value={planner.state.scenarioId} onChange={(e) => handleLoadScenario(e.target.value)} aria-label="Scenario">
-                {SCENARIOS.map((sc) => (
-                  <option key={sc.id} value={sc.id}>
-                    {sc.label}
-                  </option>
-                ))}
-              </select>
-              <SimBadge label="simulated history" />
-            </label>
+            <ScenarioMenu value={planner.state.scenarioId} onSelect={handleLoadScenario} />
             {/* Signed-in user + role switcher (simulated users, no authentication yet) */}
-            <UserMenu role={currentRole} onSelect={handleRoleSwitch} pendingMissions={pendingMissions} onResetDemo={handleResetDemo} />
+            <UserMenu role={currentRole} onSelect={handleRoleSwitch} pendingMissions={pendingMissions} onResetDemo={handleResetDemo} onOpenEvidence={() => setShowEvidenceDrawer(true)} />
           </div>
         </div>
       </header>
@@ -2288,7 +2248,7 @@ export default function MissionPlanner() {
             {pickMode && (
               <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 mh-alert !py-2 shadow-mh max-w-[calc(100%-7rem)]" role="status">
                 <Crosshair className="w-5 h-5 shrink-0" aria-hidden="true" />
-                <p className="m-0 font-semibold">Click on the map to place the point of interest</p>
+                <p className="m-0 font-semibold">Click on the map to place the point of interest · click again to move it</p>
               </div>
             )}
 
@@ -2361,16 +2321,6 @@ export default function MissionPlanner() {
                 <span className="text-base text-mh-text2" title="Nearest Perseverance waypoint (PDS)">
                   M20 Sol {clickedPoint.nearestSol} · {clickedPoint.distanceKm.toFixed(2)} km
                 </span>
-              )}
-              {currentRole === 'scientist' && (
-                <button
-                  type="button"
-                  className="mh-btn mh-btn--tinted !min-h-11 !px-4"
-                  onClick={() => setDraftPoint({ lat: clickedPoint.lat, lon: clickedPoint.lon })}
-                  title="Use the selected point for a new point of interest"
-                >
-                  <PlusCircle className="w-5 h-5" /> New POI here
-                </button>
               )}
             </div>
 
@@ -2679,55 +2629,6 @@ export default function MissionPlanner() {
         </div>
       )}
 
-      {/* ═══════════════════════════════════════════════════════════════════════
-          SHARED CONTRACT MODAL (mission plan shared by the three users)
-         ═══════════════════════════════════════════════════════════════════════ */}
-      {showJsonModal && (
-        <div
-          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={() => setShowJsonModal(false)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="json-title"
-            onClick={(e) => e.stopPropagation()}
-            className="bg-mh-card rounded-mh-lg max-w-3xl w-full max-h-[85vh] flex flex-col gap-4 p-5 sm:p-6 shadow-mh"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex flex-col gap-1">
-                <span className="mh-eyebrow">Shared state contract</span>
-                <h2 id="json-title" className="m-0 text-[22px] leading-tight font-bold">
-                  mission-plan.json
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowJsonModal(false)}
-                className="mh-btn mh-btn--icon bg-mh-fill text-mh-text shrink-0"
-                aria-label="Close"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <pre className="m-0 p-4 rounded-mh-md bg-mh-fill text-base font-mono overflow-auto flex-1 select-text">
-              {JSON.stringify({ base: BASE, ...planner.state }, null, 2)}
-            </pre>
-            <button
-              type="button"
-              className="mh-btn mh-btn--danger self-start"
-              onClick={() => {
-                if (window.confirm('Reset all points of interest and missions to the demo data?')) {
-                  handleResetDemo();
-                  setShowJsonModal(false);
-                }
-              }}
-            >
-              Reset demo data
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

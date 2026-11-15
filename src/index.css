@@ -407,30 +407,6 @@ body,
 }
 
 /* Scenario selector (top bar) */
-.mh-scenario {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: var(--mh-touch);
-  padding: 0 10px;
-  border-radius: var(--mh-radius-pill);
-  background: var(--mh-nav-fill);
-  color: var(--mh-nav-text2);
-  font: 500 13px var(--mh-font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-.mh-scenario select {
-  min-height: 30px;
-  border: 0;
-  border-radius: 3px;
-  background: #0b0f14;
-  color: #ffffff;
-  font: 600 14px var(--mh-font);
-  text-transform: none;
-  letter-spacing: 0;
-  padding: 0 6px;
-}
 .mh-log-table td {
   line-height: 1.4;
 }
