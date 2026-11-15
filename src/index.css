@@ -130,6 +130,20 @@ body,
   opacity: 0.5;
 }
 
+/* "demo value" badge: every simulated number carries it */
+.mh-sim-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 7px;
+  border-radius: var(--mh-radius-pill);
+  border: 1px dashed var(--mh-warn);
+  color: var(--mh-warn);
+  font: 500 11px/1.6 var(--mh-font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 /* Field discovery markers (Scientist "Field discoveries" map) */
 .mh-fe-marker {
   display: inline-flex;

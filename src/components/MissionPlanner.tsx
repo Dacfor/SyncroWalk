@@ -411,12 +411,14 @@ const INITIAL_MISSION_V5 = {
       name: 'Route A (Three Forks → Wildcat Ridge → Bastide Margin)',
       color: '#2D7FF9',
       dashArray: '10, 6',
-      distanceKm: 2.15,
-      elevationGainM: 48,
+      // Figures below are precomputed by computeRouteMetrics (§4, Sol 1 assumptions);
+      // the UI always shows the live computation.
+      distanceKm: 2.36,
+      elevationGainM: 28,
       slopeMax: 13.5,
       dataCoveragePct: 92,
-      evaDurationMin: 235,
-      bufferMin: 65,
+      evaDurationMin: 191,
+      bufferMin: 109,
       roverOk: true,
       funnelYield: '3 Full Handheld Funnels (35 min total analysis vs 10 Rover Sols)',
       coords: [
@@ -432,12 +434,12 @@ const INITIAL_MISSION_V5 = {
       name: 'Route A-Mod (Posterior Fused Loop via Contact Vein POI-4)',
       color: '#38bdf8',
       dashArray: '12, 5',
-      distanceKm: 2.38,
-      elevationGainM: 54,
+      distanceKm: 2.67,
+      elevationGainM: 31,
       slopeMax: 14.2,
       dataCoveragePct: 96,
-      evaDurationMin: 268,
-      bufferMin: 48,
+      evaDurationMin: 234, // with POI-4 (after the Sol 2 promotion)
+      bufferMin: 66,
       roverOk: true,
       funnelYield: '4 Full Handheld Funnels (Includes newly promoted POI-4 Vein)',
       coords: [
@@ -453,12 +455,12 @@ const INITIAL_MISSION_V5 = {
       name: 'Route B (Deep Séítah Ripple Floor + Skinner Scarp Climb)',
       color: '#35B17A',
       dashArray: null,
-      distanceKm: 3.85,
-      elevationGainM: 92,
+      distanceKm: 3.47,
+      elevationGainM: 51,
       slopeMax: 19.4,
       dataCoveragePct: 74,
-      evaDurationMin: 324,
-      bufferMin: 21, // 24 min over buffer!
+      evaDurationMin: 310,
+      bufferMin: -10, // 55 min short of the 45 min minimum buffer
       roverOk: false,
       funnelYield: '3 Funnels, but violates 45-min EVA return buffer & crosses 19.4° scarp',
       coords: [
@@ -472,14 +474,17 @@ const INITIAL_MISSION_V5 = {
     SHELTER: {
       id: 'SHELTER',
       name: 'Shelter Spur (Three Forks Alcove Rapid Return)',
+      // Pre-authorized contingency: starts at Wildcat Ridge when the SEP alert arrives (Plan v3, 12:10 LST)
+      contingency: true,
+      startLst: '12:10',
       color: '#FF6B35',
       dashArray: '7, 4',
-      distanceKm: 1.12,
-      elevationGainM: 22,
-      slopeMax: 9.5,
+      distanceKm: 0.65,
+      elevationGainM: 0,
+      slopeMax: 13.5,
       dataCoveragePct: 99,
-      evaDurationMin: 145,
-      bufferMin: 110,
+      evaDurationMin: 193, // total EVA incl. the 160 min before the divert
+      bufferMin: 107,
       roverOk: true,
       funnelYield: '2 Rapid Funnels + Emergency Basalt Scarp Radiation Shielding',
       coords: [
@@ -501,9 +506,9 @@ const INITIAL_MISSION_V5 = {
       approvedBy: 'Flight Dir. M. Vance & Sci Lead Dr. A. Patel',
       routeId: 'A',
       poiOrder: ['POI-1', 'POI-2'],
-      diffSummary: 'Plan v1 (Baseline): Route A · Wildcat Ridge → Bastide (235 min EVA)',
+      diffSummary: 'Plan v1 (Baseline): Route A · Wildcat Ridge → Bastide (191 min EVA)',
       diffItems: [
-        'Route A selected (2.15 km); Route B rejected (+24 min over EVA return buffer in Séítah sand)',
+        'Route A selected (2.36 km); Route B rejected (return buffer −10 min, 19.4° scarp)',
         'Targets: POI-1 (Wildcat Ridge) → POI-2 (Bastide) based on orbital CRISM prior'
       ],
       reason:
@@ -521,10 +526,10 @@ const INITIAL_MISSION_V5 = {
         'Plan v2 received — 2 changes: (1) Promoted POI-4 Vein [HIGH] via PDS Funnel, (2) Switched to Route A-Mod',
       diffItems: [
         '+ PROMOTED POI-4 (Séítah-Delta Contact Vein · 11.2 wt% H2O confirmed by handheld PIXL/SHERLOC in 12 min)',
-        '↻ ROUTE ADAPTED to Route A-Mod (2.38 km, 48 min return buffer OK)'
+        '↻ ROUTE ADAPTED to Route A-Mod (2.67 km, 66 min return buffer OK)'
       ],
       reason:
-        'In-situ handheld funnel compressed 4 rover sols into 12 minutes, shrinking local uncertainty from ±34% to ±3.8%.'
+        'In-situ handheld funnel compressed 4 rover sols into 12 minutes and replaced the orbital estimate with a measured value.'
     },
     {
       version: 'v3',
@@ -535,7 +540,7 @@ const INITIAL_MISSION_V5 = {
       routeId: 'SHELTER',
       poiOrder: ['POI-1', 'DELTA-ALCOVE-SHELTER'],
       diffSummary:
-        'Plan v3 EMERGENCY: EVA shortened to 145 min, divert to Delta Basal Alcove Shelter, POI-2/POI-3 postponed',
+        'Plan v3 EMERGENCY: divert to Delta basal alcove, back in HAB 12:43 LST, POI-2/POI-3 postponed',
       diffItems: [
         '⚠ PRE-AUTHORIZED SAFETY RULE: Divert via orange Shelter Spur to Delta Basal Alcove',
         '⏸ POSTPONED POI-2 & POI-3; secured Wildcat Ridge & Contact Vein cores'
@@ -549,9 +554,9 @@ const INITIAL_MISSION_V5 = {
     chosenOrder: ['POI-1', 'POI-2'],
     rejected: [
       {
-        option: 'Route B (+1.7 km via Deep Séítah Ripples & Skinner Scarp, covers POI-3)',
+        option: 'Route B (3.47 km via deep Séítah ripples & Skinner scarp, covers POI-3)',
         reason:
-          'Rejected: 24 min over EVA return buffer (requires 324 min > 300 min cap [demo parameter]) & 19.4° scarp slope'
+          'Rejected: return buffer −10 min (min 45) · 310 min EVA > 300 min cap [demo parameter] · 19.4° scarp'
       }
     ]
   },
@@ -625,17 +630,24 @@ const seededRandom = (seed) => {
 // Turns straight waypoint-to-waypoint segments into a meandering, terrain-following
 // path. The path still passes exactly through every waypoint (POIs, HAB, shelter):
 // only the in-between geometry is displaced. Data in mission.routes stays unchanged.
-const toRealisticPath = (coords, seedKey) => {
-  if (!coords || coords.length < 2) return coords;
+// toRealisticLegs returns one point array per leg (both endpoints included), so the
+// route model (§4) measures exactly the geometry that is drawn on the map.
+const toRealisticLegs = (coords, seedKey) => {
+  if (!coords || coords.length < 2) return [];
   const rand = seededRandom(hashString(seedKey));
-  const out = [coords[0]];
+  const legs = [];
   for (let i = 0; i < coords.length - 1; i++) {
     const [lat1, lon1] = coords[i];
     const [lat2, lon2] = coords[i + 1];
+    const out = [coords[i]];
+    legs.push(out);
     const dLat = lat2 - lat1;
     const dLon = lon2 - lon1;
     const len = Math.hypot(dLat, dLon);
-    if (len === 0) continue;
+    if (len === 0) {
+      out.push(coords[i + 1]);
+      continue;
+    }
     const steps = Math.max(8, Math.round(len / 0.00025)); // one vertex every ~15 m
     const nLat = -dLon / len; // unit normal to the segment
     const nLon = dLat / len;
@@ -657,7 +669,13 @@ const toRealisticPath = (coords, seedKey) => {
     }
     out.push(coords[i + 1]);
   }
-  return out;
+  return legs;
+};
+
+const toRealisticPath = (coords, seedKey) => {
+  if (!coords || coords.length < 2) return coords;
+  const legs = toRealisticLegs(coords, seedKey);
+  return legs.flatMap((leg, i) => (i === 0 ? leg : leg.slice(1)));
 };
 
 const flagSvg = (color, label = '', size = 1) =>
@@ -808,6 +826,539 @@ const CREW_ROSTER = [
     psych: 'Nominal'
   }
 ];
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// §4 MISSION MODEL — DEMO ASSUMPTIONS + PURE, TESTABLE HELPERS
+// Every constant below is ILLUSTRATIVE (a "demo value"), chosen to be physically
+// plausible. Nothing in this block is a NASA requirement or a PDS measurement,
+// except where a published reference is cited as context.
+// ═══════════════════════════════════════════════════════════════════════════════
+const KM_PER_DEG = 59.16; // km per degree of latitude on Mars (same factor as the nearest-Sol search)
+
+const DEMO_ASSUMPTIONS = {
+  // ── Radiation ──────────────────────────────────────────────────────────────
+  // GCR dose equivalent at the surface: 0.64 mSv/sol (MSL/RAD at Gale, Hassler et al. 2014)
+  doseBackgroundMsvPerSol: 0.64,
+  // Surface ABSORBED dose rate in µGy/h (tissue). 9.1 µGy/h × 24.66 h ≈ 0.22 mGy/sol (RAD: ≈0.21).
+  // EVA dose (mSv) = rate (µGy/h) × EVA hours × qualityFactor ÷ 1000
+  doseRateNominalUgyH: DOSE_RATE_NOMINAL_UGY_H,
+  doseRateSepUgyH: DOSE_RATE_SEP_UGY_H, // scripted SEP event (demo)
+  qualityFactor: 3.05, // mSv per mGy for surface GCR (0.64 mSv ÷ 0.21 mGy per sol)
+  habitatShieldingFactor: 0.6, // dose inside the HAB = surface dose × 0.6
+  stormShelterFactor: 0.1, // inside the HAB storm shelter / rock alcove during an SEP
+  crewSurfaceDoseBudgetMsv: 40, // demo budget for this surface phase
+  nasaCareerLimitMsv: 600, // NASA-STD-3001 career limit — context only, not used in decisions
+  surfacePhaseSols: 45, // demo length of the surface phase
+  evaDoseLimitMsv: 2, // demo per-EVA dose limit
+  sepMinWarningMin: 40, // minimum warning before ~100 MeV protons arrive → max time to shelter
+  // ── Mobility (reduced suit mobility) ───────────────────────────────────────
+  walkSpeedKmhFlat: 2.5,
+  slopeSpeedLossPerDeg: 0.035, // speed × (1 − 0.035 × slope°), never below 30 %
+  softSoilSpeedFactor: 0.6, // within softSoilRadiusKm of a soft-soil field report
+  softSoilRadiusKm: 0.08,
+  notEvaluatedSpeedFactor: 0.75, // terrain not evaluated from orbit → walk slower
+  shelterPathTortuosity: 1.2, // straight line → walkable path when running to a shelter
+  // ── Timeline ───────────────────────────────────────────────────────────────
+  egressMin: 20, // airlock + suit checks
+  ingressMin: 15,
+  funnelMinPerPoi: 12, // handheld SuperCam → abrader → PIXL/SHERLOC
+  defaultSamplingMin: 20, // documentation + sampling after the funnel
+  investigateDeeperStepMin: 12,
+  // ── Metabolic & suit consumables ───────────────────────────────────────────
+  metabolicWalkFlatW: 300,
+  metabolicPerSlopeDegW: 25,
+  softTerrainMetabolicFactor: 1.3, // soft soil or not-evaluated terrain
+  metabolicStationW: 220,
+  metabolicOverheadW: 180, // egress / ingress
+  suitConsumablesWh: 2000, // demo O2 / cooling capacity, expressed as metabolic energy
+  suitReservePct: 20,
+  // ── Terrain & environment ──────────────────────────────────────────────────
+  slopeLimitDeg: 15,
+  notEvaluatedMaxPct: 10, // max share of the route on not-evaluated terrain
+  dustDevilWindowLst: ['11:00', '15:00'],
+  tauVisibilityDegraded: 3,
+  latitudeDeg: 18.44,
+  solarDeclinationDeg: 12.3 // Ls ≈ 30° (demo season)
+};
+
+// Local slopes along the routes (HiRISE DTM 1 m/px — demo values). MOLA alone (~460 m/px) cannot see them.
+const SLOPE_FEATURES = [
+  {
+    id: 'SCARP',
+    name: 'Delta scarp below Skinner Ridge',
+    slopeDeg: 19.4,
+    radiusKm: 0.06,
+    coords: [
+      [18.4468, 77.4542],
+      [18.4518, 77.4595]
+    ]
+  },
+  {
+    id: 'WILDCAT',
+    name: 'Wildcat Ridge climb',
+    slopeDeg: 13.5,
+    radiusKm: 0.07,
+    coords: [
+      [18.4438, 77.4516],
+      [18.4452, 77.4512]
+    ]
+  },
+  {
+    id: 'NUKSHAK',
+    name: 'Cape Nukshak bench',
+    slopeDeg: 14.2,
+    radiusKm: 0.03,
+    coords: [
+      [18.4398, 77.4484],
+      [18.4408, 77.4485]
+    ]
+  }
+];
+
+const SHELTERS = [
+  { id: 'HAB', name: 'HAB · Three Forks', lat: 18.4402, lon: 77.4525, elev: -2560 },
+  { id: 'ALCOVE', name: 'Delta basal alcove', lat: 18.4428, lon: 77.4472, elev: -2552 }
+];
+const HAB = SHELTERS[0];
+
+// Hypotheses for the objective "Delta phyllosilicates & biosignatures" (demo data)
+const HYPOTHESES = [
+  {
+    id: 'H1',
+    title: 'Delta-front mudstones preserve aqueous clays',
+    poiIds: ['POI-1', 'POI-2']
+  },
+  {
+    id: 'H2',
+    title: 'Silica veins at the Séítah–delta contact record late fluids',
+    poiIds: ['POI-4']
+  },
+  {
+    id: 'H3',
+    title: 'Delta conglomerates sample the wider watershed',
+    poiIds: ['POI-3']
+  }
+];
+
+// ── Geometry ────────────────────────────────────────────────────────────────
+const COS_LAT = Math.cos((DEMO_ASSUMPTIONS.latitudeDeg * Math.PI) / 180);
+const toKmXY = ([lat, lon]) => [lon * COS_LAT * KM_PER_DEG, lat * KM_PER_DEG];
+const distKm = (a, b) => {
+  const [ax, ay] = toKmXY(a);
+  const [bx, by] = toKmXY(b);
+  return Math.hypot(ax - bx, ay - by);
+};
+const distToSegmentKm = (p, a, b) => {
+  const [px, py] = toKmXY(p);
+  const [ax, ay] = toKmXY(a);
+  const [bx, by] = toKmXY(b);
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2)) : 0;
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+};
+const distToPolylineKm = (p, coords) =>
+  coords.slice(1).reduce((m, b, i) => Math.min(m, distToSegmentKm(p, coords[i], b)), Infinity);
+const samePoint = (a, b, tolDeg = 0.00015) =>
+  Math.abs(a[0] - b[0]) < tolDeg && Math.abs(a[1] - b[1]) < tolDeg;
+const bearingDeg = (from, to) => {
+  const [ax, ay] = toKmXY(from);
+  const [bx, by] = toKmXY(to);
+  return (Math.atan2(bx - ax, by - ay) * 180 / Math.PI + 360) % 360;
+};
+const compassPoint = (deg) => ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(deg / 45) % 8];
+const inNotEvaluated = ([lat, lon]) =>
+  JEZERO_NOT_EVALUATED_ZONES.some(
+    (z) => lat >= z.bounds[0][0] && lat <= z.bounds[1][0] && lon >= z.bounds[0][1] && lon <= z.bounds[1][1]
+  );
+
+// Local Jezero MOLA elevation estimator (Séítah ≈ −2570 m → western delta ≈ −2490 m)
+const molaElevationEstimate = (lat, lon) => {
+  const dLat = lat - 18.435;
+  const dLon = lon - 77.455;
+  return Math.round(-2564 + Math.max(0, dLat * 1400 - dLon * 900));
+};
+
+const lstToMin = (hhmm) => {
+  const [h, m] = hhmm.split(':').map(Number);
+  return h * 60 + m;
+};
+
+const localSlopeFeature = (pt) =>
+  SLOPE_FEATURES.filter((f) => distToPolylineKm(pt, f.coords) <= f.radiusKm).sort(
+    (a, b) => b.slopeDeg - a.slopeDeg
+  )[0] ?? null;
+
+const isSoftSoil = (pt, fieldEvents, A) =>
+  fieldEvents.some((f) => f.class === 'soft-soil' && distKm(pt, [f.lat, f.lon]) <= A.softSoilRadiusKm);
+
+// Walking speed multiplier at a point (slope feature, soft soil, not-evaluated terrain)
+const terrainSpeedFactor = (pt, slopeDeg, fieldEvents, A) => {
+  let f = Math.max(0.3, 1 - A.slopeSpeedLossPerDeg * slopeDeg);
+  if (isSoftSoil(pt, fieldEvents, A)) f *= A.softSoilSpeedFactor;
+  if (inNotEvaluated(pt)) f *= A.notEvaluatedSpeedFactor;
+  return f;
+};
+
+// Minutes to walk to the nearest shelter (HAB or alcove) from a point.
+// Local terrain only slows the first part of the way back: average it with flat ground.
+const timeToShelterMin = (pt, fieldEvents, A) => {
+  const feature = localSlopeFeature(pt);
+  const local = terrainSpeedFactor(pt, feature?.slopeDeg ?? 0, fieldEvents, A);
+  const speed = A.walkSpeedKmhFlat * (0.5 + 0.5 * local);
+  const km = Math.min(...SHELTERS.map((s) => distKm(pt, [s.lat, s.lon]))) * A.shelterPathTortuosity;
+  return (km / speed) * 60;
+};
+
+// Waypoint → what it is (HAB, alcove shelter, POI, field event, Perseverance waypoint)
+const identifyWaypoint = (pt, pois, fieldEvents) => {
+  const shelter = SHELTERS.find((s) => samePoint(pt, [s.lat, s.lon]));
+  if (shelter) return { kind: shelter.id === 'HAB' ? 'hab' : 'shelter', name: shelter.name, elev: shelter.elev };
+  const poi = pois.find((p) => samePoint(pt, [p.lat, p.lon]));
+  if (poi) return { kind: 'poi', poi, name: `${poi.id} · ${poi.name.split('(')[0].trim()}`, elev: poi.elevM };
+  const fe = fieldEvents.find((f) => samePoint(pt, [f.lat, f.lon]));
+  if (fe) return { kind: 'waypoint', name: `${fe.id} location`, elev: molaElevationEstimate(pt[0], pt[1]) };
+  const wp = FALLBACK_M20_WAYPOINTS.find((w) => samePoint(pt, [w.lat, w.lon]));
+  if (wp) return { kind: 'waypoint', name: wp.name, elev: wp.elev };
+  return { kind: 'waypoint', name: 'Waypoint', elev: molaElevationEstimate(pt[0], pt[1]) };
+};
+
+// Route waypoints as a closed EVA loop (HAB → … → HAB). A contingency route (Shelter
+// Spur) starts where the crew is when the alert arrives, so it is not prefixed with HAB.
+const routeWaypoints = (route) => {
+  const habPt = [HAB.lat, HAB.lon];
+  const coords = [...route.coords];
+  if (!route.contingency && !samePoint(coords[0], habPt)) coords.unshift(habPt);
+  if (!samePoint(coords[coords.length - 1], habPt)) coords.push(habPt);
+  return coords;
+};
+
+const stationMinutes = (poi, A) =>
+  A.funnelMinPerPoi +
+  (poi.durationMin != null ? Math.max(0, poi.durationMin - A.funnelMinPerPoi) : A.defaultSamplingMin) +
+  (poi.extraFunnelMin ?? 0);
+
+const isPoiActiveInPlan = (poi) => !poi.postponedInSol3 && poi.inPlan !== false;
+
+/**
+ * Full EVA model for one route. Pure: depends only on its arguments.
+ * Returns distances, ETAs (LST), buffers, slopes, not-evaluated km, time-to-shelter,
+ * a ~40-sample elevation profile, metabolic load, suit consumables and EVA dose per EV.
+ */
+const computeRouteMetrics = (route, pois, A, ctx) => {
+  const { timeWindow, sepAlertActive = false, fieldEvents = [] } = ctx;
+  const wps = routeWaypoints(route);
+  const legs = toRealisticLegs(wps, route.id);
+  const startLst = route.contingency ? route.startLst : timeWindow.suggestedStart;
+  // Contingency: the EVA started at the planned time; minutes already spent before the divert
+  const priorEvaMin = route.contingency ? lstToMin(route.startLst) - lstToMin(timeWindow.suggestedStart) : 0;
+
+  let t = route.contingency ? 0 : A.egressMin; // minutes since this route starts
+  let energyKJ = route.contingency ? 0 : (A.metabolicOverheadW * A.egressMin * 60) / 1000;
+  let peakW = A.metabolicOverheadW;
+  let distanceKm = 0;
+  let walkMin = 0;
+  let stationMin = 0;
+  let neKm = 0;
+  let steepKm = 0;
+  let maxSlopeDeg = 0;
+  let maxSlopeName = 'MOLA gradient';
+  let maxShelterMin = 0;
+  let gainM = 0;
+  let firstShelterMin = null; // minutes until the first shelter waypoint (for SEP dose)
+  const raw = []; // fine samples along the path
+  const first = identifyWaypoint(wps[0], pois, fieldEvents);
+  const stops = [
+    {
+      kind: first.kind === 'hab' ? 'start' : 'divert',
+      name: first.kind === 'hab' ? HAB.name : `${first.name} (divert)`,
+      lat: wps[0][0],
+      lon: wps[0][1],
+      etaMin: 0,
+      departMin: t,
+      distKm: 0
+    }
+  ];
+
+  legs.forEach((leg, li) => {
+    const a = identifyWaypoint(wps[li], pois, fieldEvents);
+    const b = identifyWaypoint(wps[li + 1], pois, fieldEvents);
+    const molaA = molaElevationEstimate(wps[li][0], wps[li][1]);
+    const molaB = molaElevationEstimate(wps[li + 1][0], wps[li + 1][1]);
+    const legLen = leg.slice(1).reduce((s, q, i) => s + distKm(leg[i], q), 0) || 1e-9;
+    let along = 0;
+    let prevElev = a.elev;
+    leg.slice(1).forEach((q, i) => {
+      const p = leg[i];
+      const d = distKm(p, q);
+      along += d;
+      const f = along / legLen;
+      // Elevation anchored on known waypoint elevations (PDS / POI), MOLA trend in between
+      const elev =
+        a.elev + (b.elev - a.elev) * f + (molaElevationEstimate(q[0], q[1]) - (molaA + (molaB - molaA) * f));
+      const mid = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+      const profileSlope = d > 0 ? Math.abs(Math.atan2(elev - prevElev, d * 1000) * 180 / Math.PI) : 0;
+      const feature = localSlopeFeature(mid);
+      const slope = Math.max(profileSlope, feature?.slopeDeg ?? 0);
+      if (slope > maxSlopeDeg) {
+        maxSlopeDeg = slope;
+        maxSlopeName = feature && feature.slopeDeg >= profileSlope ? feature.name : 'MOLA gradient';
+      }
+      const ne = inNotEvaluated(mid);
+      const soft = isSoftSoil(mid, fieldEvents, A);
+      const speed = A.walkSpeedKmhFlat * terrainSpeedFactor(mid, slope, fieldEvents, A);
+      const segMin = (d / speed) * 60;
+      const watts =
+        (A.metabolicWalkFlatW + A.metabolicPerSlopeDegW * slope) * (soft || ne ? A.softTerrainMetabolicFactor : 1);
+      energyKJ += (watts * segMin * 60) / 1000;
+      peakW = Math.max(peakW, watts);
+      if (elev > prevElev) gainM += elev - prevElev;
+      prevElev = elev;
+      distanceKm += d;
+      walkMin += segMin;
+      t += segMin;
+      if (ne) neKm += d;
+      if (slope > A.slopeLimitDeg) steepKm += d;
+      maxShelterMin = Math.max(maxShelterMin, timeToShelterMin(mid, fieldEvents, A));
+      raw.push({ distKm: distanceKm, elev, slope, ne, soft, steep: slope > A.slopeLimitDeg, lat: q[0], lon: q[1] });
+    });
+
+    const stop = { kind: b.kind, name: b.name, lat: wps[li + 1][0], lon: wps[li + 1][1], etaMin: t, distKm: distanceKm };
+    if (b.kind === 'poi' && isPoiActiveInPlan(b.poi)) {
+      const st = stationMinutes(b.poi, A);
+      stop.poiId = b.poi.id;
+      stop.stationMin = st;
+      stationMin += st;
+      energyKJ += (A.metabolicStationW * st * 60) / 1000;
+      t += st;
+    } else if (b.kind === 'poi') {
+      stop.poiId = b.poi.id;
+      stop.skipped = true; // postponed or removed from plan: walk past it
+    }
+    if ((b.kind === 'shelter' || b.kind === 'hab') && firstShelterMin == null) firstShelterMin = stop.etaMin;
+    stop.departMin = t;
+    stops.push(stop);
+  });
+
+  energyKJ += (A.metabolicOverheadW * A.ingressMin * 60) / 1000;
+  const routeMin = t + A.ingressMin;
+  const evaDurationMin = Math.round(priorEvaMin + routeMin);
+  const endLst = addMinutesToLst(startLst, Math.round(routeMin));
+  const bufferMin = Math.round(lstToMin(timeWindow.latestReturn) - lstToMin(startLst) - routeMin);
+  const energyWh = energyKJ / 3.6;
+  const consumablesUsedPct =
+    ((energyWh + (route.contingency ? priorEvaMin * A.metabolicStationW / 60 : 0)) / A.suitConsumablesWh) * 100;
+
+  // Dose per EVA crew member (mSv). SEP: full SEP rate until the first shelter, storm-shelter factor after.
+  const toMsv = (ugyPerH, minutes) => (ugyPerH * (minutes / 60) * A.qualityFactor) / 1000;
+  let doseEvaMsv;
+  if (!sepAlertActive) {
+    doseEvaMsv = toMsv(A.doseRateNominalUgyH, evaDurationMin);
+  } else if (route.contingency && firstShelterMin != null) {
+    doseEvaMsv =
+      toMsv(A.doseRateNominalUgyH, priorEvaMin) +
+      toMsv(A.doseRateSepUgyH, firstShelterMin) +
+      toMsv(A.doseRateSepUgyH * A.stormShelterFactor, routeMin - firstShelterMin);
+  } else {
+    doseEvaMsv = toMsv(A.doseRateSepUgyH, evaDurationMin);
+  }
+
+  // Resample to ~40 points for the elevation profile
+  const n = 40;
+  const samples = Array.from({ length: n + 1 }, (_, i) => {
+    const target = (distanceKm * i) / n;
+    return raw.find((s) => s.distKm >= target - 1e-9) ?? raw[raw.length - 1];
+  });
+  const segments = raw.map((s, i) => ({
+    from: i === 0 ? 0 : raw[i - 1].distKm,
+    to: s.distKm,
+    steep: s.steep,
+    ne: s.ne
+  }));
+
+  return {
+    routeId: route.id,
+    contingency: !!route.contingency,
+    path: legs.flatMap((leg, i) => (i === 0 ? leg : leg.slice(1))),
+    stops: stops.map((s) => ({
+      ...s,
+      etaLst: addMinutesToLst(startLst, Math.round(s.etaMin)),
+      departLst: addMinutesToLst(startLst, Math.round(s.departMin ?? s.etaMin))
+    })),
+    startLst,
+    endLst,
+    latestReturn: timeWindow.latestReturn,
+    distanceKm,
+    walkMin,
+    stationMin,
+    evaDurationMin,
+    bufferMin,
+    maxSlopeDeg,
+    maxSlopeName,
+    steepKm,
+    neKm,
+    nePct: distanceKm ? (neKm / distanceKm) * 100 : 0,
+    maxTimeToShelterMin: maxShelterMin,
+    gainM,
+    energyKJ,
+    energyWh,
+    avgW: (energyKJ * 1000) / (routeMin * 60),
+    peakW,
+    consumablesRemainingPct: Math.max(0, 100 - consumablesUsedPct),
+    doseEvaMsv,
+    samples,
+    segments
+  };
+};
+
+/**
+ * Turns route metrics into an explicit list of constraints with numeric margins.
+ * status: ok (margin ≥ 10 % of scale) · watch (0–10 %) · violated (margin < 0).
+ * The binding constraint (smallest relative margin) is flagged `determinant`.
+ */
+const evaluateConstraints = (m, A, timeWindow, ctx = {}) => {
+  const rows = [];
+  const add = (id, name, value, limit, dir, unit, scale, fmt = (v) => `${Math.round(v)}`) => {
+    const margin = dir === 'max' ? limit - value : value - limit;
+    const rel = margin / Math.abs(scale || limit || 1);
+    const status = margin < 0 ? 'violated' : rel < 0.1 ? 'watch' : 'ok';
+    rows.push({ id, name, value, limit, dir, unit, margin, rel, status, fmt });
+  };
+  add('duration', 'EVA duration', m.evaDurationMin, timeWindow.evaMaxMin, 'max', 'min');
+  add('buffer', 'Return buffer', m.bufferMin, timeWindow.returnBufferMin, 'min', 'min');
+  add(
+    'latest',
+    'Back in HAB by',
+    lstToMin(m.endLst),
+    lstToMin(timeWindow.latestReturn),
+    'max',
+    'LST',
+    timeWindow.evaMaxMin,
+    (v) => addMinutesToLst('00:00', Math.round(v))
+  );
+  add('slope', 'Max slope', m.maxSlopeDeg, A.slopeLimitDeg, 'max', '°', A.slopeLimitDeg, (v) => v.toFixed(1));
+  add('shelter', 'Max time to shelter', m.maxTimeToShelterMin, A.sepMinWarningMin, 'max', 'min');
+  add('consumables', 'Suit consumables left', m.consumablesRemainingPct, A.suitReservePct, 'min', '%', 100);
+  add('notEvaluated', 'Not-evaluated terrain', m.nePct, A.notEvaluatedMaxPct, 'max', '%', 100, (v) => v.toFixed(1));
+  add('dose', 'EVA dose', m.doseEvaMsv, A.evaDoseLimitMsv, 'max', 'mSv', A.evaDoseLimitMsv, (v) => v.toFixed(2));
+  if (ctx.sepAlertActive && !m.contingency) {
+    rows.push({
+      id: 'sep',
+      name: 'SEP alert: shelter route only',
+      value: 1,
+      limit: 0,
+      dir: 'max',
+      unit: '',
+      margin: -1,
+      rel: -1,
+      status: 'violated',
+      fmt: () => 'active'
+    });
+  }
+  const determinant = rows.reduce((d, r) => (r.rel < d.rel ? r : d), rows[0]);
+  determinant.determinant = true;
+  const overall = rows.some((r) => r.status === 'violated')
+    ? 'violated'
+    : rows.some((r) => r.status === 'watch')
+    ? 'watch'
+    : 'ok';
+  return { rows, determinant, overall };
+};
+
+// Per-EVA dose allocation = nominal EVA dose + worst case: SEP rate for the full warning time
+const evaDoseAllocationMsv = (typicalEvaDoseMsv, A) =>
+  typicalEvaDoseMsv + (A.doseRateSepUgyH * (A.sepMinWarningMin / 60) * A.qualityFactor) / 1000;
+
+// EVAs still allowed by dose: (budget − actual − future habitat background) ÷ per-EVA allocation
+const remainingEvasByDose = (member, A, typicalEvaDoseMsv, currentSol) => {
+  const solsLeft = Math.max(0, A.surfacePhaseSols - currentSol);
+  const habitatFuture = solsLeft * A.doseBackgroundMsvPerSol * A.habitatShieldingFactor;
+  const left = A.crewSurfaceDoseBudgetMsv - member.doseActualMsv - habitatFuture;
+  return Math.max(0, Math.floor(left / evaDoseAllocationMsv(typicalEvaDoseMsv, A)));
+};
+
+// Hydration estimate of a POI: orbital prior and (if measured) in-situ value, with 1σ
+const parseNum = (s) => {
+  const m = String(s ?? '').match(/-?\d+(\.\d+)?/);
+  return m ? parseFloat(m[0]) : null;
+};
+const getHydration = (poi) => {
+  const pv = parseNum(poi.orbitalPrior?.hydrationEst);
+  const pr = parseNum(poi.orbitalPrior?.uncertainty);
+  const prior = pv != null && pr != null ? { value: pv, sigma: (pv * pr) / 100, relPct: pr } : null;
+  const qv = parseNum(poi.pdsInSituPosterior?.hydrationPosterior);
+  const qr = parseNum(poi.pdsInSituPosterior?.uncertaintyAfter);
+  const posterior =
+    poi.dataConfidence !== 'orbital-only' && qv != null && qr != null
+      ? { value: qv, sigma: (qv * qr) / 100, relPct: qr }
+      : null;
+  const residual =
+    prior && posterior ? { delta: posterior.value - prior.value, nSigma: (posterior.value - prior.value) / prior.sigma } : null;
+  return { prior, posterior, residual };
+};
+
+// Residual strength: does the in-situ value confirm (≈ prior) or contradict the orbital estimate?
+const residualLevel = (nSigma) =>
+  Math.abs(nSigma) < 1
+    ? { label: 'Confirms prior', color: '#8E8E93', strength: 0 }
+    : Math.abs(nSigma) < 2
+    ? { label: 'Partly contradicts prior', color: '#E5C04A', strength: 1 }
+    : { label: 'Contradicts prior', color: '#FF6B35', strength: 2 };
+
+// Hypothesis status from the POIs that test it (demo rule)
+const hypothesisStatus = (h, pois) => {
+  const tested = pois.filter((p) => h.poiIds.includes(p.id));
+  const evidence = tested
+    .filter((p) => p.dataConfidence === 'complete')
+    .map((p) => getHydration(p).residual)
+    .filter(Boolean);
+  if (!evidence.length) return 'open';
+  if (evidence.some((r) => r.nSigma <= -1)) return 'weakened';
+  return evidence.some((r) => r.nSigma >= 1) ? 'supported' : 'open';
+};
+
+// Solar elevation: sin e = sin φ sin δ + cos φ cos δ cos h  (h = hour angle from local solar noon)
+const sunElevationDeg = (lst, A) => {
+  const rad = Math.PI / 180;
+  const h = ((lstToMin(lst) - 720) / 60) * 15;
+  const s =
+    Math.sin(A.latitudeDeg * rad) * Math.sin(A.solarDeclinationDeg * rad) +
+    Math.cos(A.latitudeDeg * rad) * Math.cos(A.solarDeclinationDeg * rad) * Math.cos(h * rad);
+  return Math.asin(s) / rad;
+};
+
+// Area reachable from a shelter within `minutes` (rays every 5°, terrain-aware walking speed)
+const shelterIsochrone = (shelter, minutes, fieldEvents, A) => {
+  const stepKm = 0.02;
+  const origin = [shelter.lat, shelter.lon];
+  return Array.from({ length: 72 }, (_, i) => {
+    const th = (i * 5 * Math.PI) / 180;
+    let tMin = 0;
+    let r = 0;
+    let pt = origin;
+    while (r < 4) {
+      const next = [
+        origin[0] + ((r + stepKm) * Math.cos(th)) / KM_PER_DEG,
+        origin[1] + ((r + stepKm) * Math.sin(th)) / (KM_PER_DEG * COS_LAT)
+      ];
+      const slope = localSlopeFeature(next)?.slopeDeg ?? 0;
+      const speed = A.walkSpeedKmhFlat * terrainSpeedFactor(next, slope, fieldEvents, A);
+      const dt = ((stepKm * A.shelterPathTortuosity) / speed) * 60;
+      if (tMin + dt > minutes) break;
+      tMin += dt;
+      r += stepKm;
+      pt = next;
+    }
+    return pt;
+  });
+};
+
+const STATUS_META = {
+  ok: { label: 'OK', cls: 'mh-pill--ok', color: '#35B17A' },
+  watch: { label: 'Watch', cls: 'mh-pill--warn', color: '#E5C04A' },
+  violated: { label: 'Violated', cls: 'mh-pill--crit', color: '#E5484D' }
+};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN APPLICATION COMPONENT
@@ -967,13 +1518,8 @@ export default function MissionPlanner() {
   };
 
   // Local Jezero MOLA Elevation Estimator + Optional Live HTTP Range GeoTIFF reader
-  const estimateJezeroMolaElevation = (lat, lon) => {
-    // Accurate topographic gradient across Séítah (-2570m) to Western Delta (-2490m)
-    const dLat = lat - 18.435;
-    const dLon = lon - 77.455;
-    const deltaRise = Math.max(0, (dLat * 1400) - (dLon * 900));
-    return Math.round(-2564 + deltaRise);
-  };
+  // Topographic gradient across Séítah (−2570 m) to Western Delta (−2490 m) — see §4 molaElevationEstimate
+  const estimateJezeroMolaElevation = (lat, lon) => molaElevationEstimate(lat, lon);
 
   const findNearestPerseveranceSol = (lat, lon) => {
     let best = null;
@@ -1661,9 +2207,9 @@ export default function MissionPlanner() {
           chosenOrder: ['POI-4', 'POI-1', 'POI-2'],
           rejected: [
             {
-              option: 'Route B (+1.7 km via Deep Séítah Ripples, covers POI-3)',
+              option: 'Route B (3.47 km via deep Séítah ripples, covers POI-3)',
               reason:
-                'Rejected: 24 min over EVA return buffer (requires 324 min > 300 min cap [demo parameter])'
+                'Rejected: return buffer −10 min (min 45) · 310 min EVA > 300 min cap [demo parameter] · 19.4° scarp'
             },
             {
               option: 'Route A (Original Orbital Prior Baseline)',
@@ -1817,7 +2363,7 @@ export default function MissionPlanner() {
       });
       setSelectedPoiId('POI-1');
       triggerToast(
-        'DEMO SOL 1: Orbital CRISM Prior (±32% unc.) loaded · Route A selected (235 min EVA).'
+        'DEMO SOL 1: Orbital CRISM prior loaded · Route A selected (191 min EVA).'
       );
     } else if (solStep === 2) {
       setSepAlertActive(false);
@@ -1838,9 +2384,9 @@ export default function MissionPlanner() {
           chosenOrder: ['POI-1', 'DELTA-ALCOVE-SHELTER'],
           rejected: [
             {
-              option: 'Route A-Mod (Full 268 min Loop)',
+              option: 'Route A-Mod (full loop)',
               reason:
-                'Rejected: Exceeds 150 min SEP radiation exposure cap during scripted DONKI alert [demo parameter]'
+                'Rejected: SEP alert — EVA dose 8.1 mSv > 2 mSv limit [demo parameter]; only the pre-authorized shelter route is allowed'
             }
           ]
         }
@@ -3269,6 +3815,206 @@ function Stat({ label, value, tile = false }) {
       <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">{label}</span>
       <span className="text-base font-semibold">{value}</span>
     </span>
+  );
+}
+
+// Small badge for every number that is not a real NASA measurement
+function SimBadge({ label = 'demo value' }) {
+  return (
+    <span className="mh-sim-badge" title="Simulated / illustrative value — not a NASA measurement">
+      {label}
+    </span>
+  );
+}
+
+const fmtNum = (v, digits) => (v == null ? '—' : v.toFixed(digits ?? (Math.abs(v) >= 10 ? 1 : 2)));
+
+const MEASURE_KIND = {
+  prior: { label: 'Orbital prior', cls: 'mh-pill--warn' },
+  insitu: { label: 'In-situ', cls: 'mh-pill--ok' },
+  fused: { label: 'Fused posterior', cls: 'mh-pill--info' }
+};
+
+/**
+ * The single way to show a measured / estimated value in the app: value ± 1σ in the same
+ * unit, relative uncertainty, provenance badge (mission · instrument · resolution) and kind.
+ * Variant "compare" (pass `prior` + `posterior`): overlapping 1σ intervals and the residual.
+ */
+function ValueWithUncertainty({
+  label,
+  value,
+  sigma,
+  unit,
+  kind = 'prior',
+  source,
+  simulated = true,
+  prior,
+  posterior,
+  priorSource,
+  posteriorSource,
+  compact = false
+}) {
+  if (prior && posterior) {
+    const lo = Math.min(prior.value - 2 * prior.sigma, posterior.value - 2 * posterior.sigma, 0);
+    const hi = Math.max(prior.value + 2 * prior.sigma, posterior.value + 2 * posterior.sigma);
+    const x = (v) => 8 + ((v - lo) / (hi - lo || 1)) * 284;
+    const residual = posterior.value - prior.value;
+    const nSigma = residual / (prior.sigma || 1);
+    const level = residualLevel(nSigma);
+    return (
+      <div className="flex flex-col gap-2">
+        {label && (
+          <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">{label}</span>
+        )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <ValueWithUncertainty
+            value={prior.value}
+            sigma={prior.sigma}
+            unit={unit}
+            kind="prior"
+            source={priorSource}
+            simulated={simulated}
+            compact
+          />
+          <ValueWithUncertainty
+            value={posterior.value}
+            sigma={posterior.sigma}
+            unit={unit}
+            kind="insitu"
+            source={posteriorSource}
+            simulated={simulated}
+            compact
+          />
+        </div>
+        <svg viewBox="0 0 300 46" className="w-full h-auto" role="img" aria-label={`Prior ${fmtNum(prior.value)} ± ${fmtNum(prior.sigma)} versus in-situ ${fmtNum(posterior.value)} ± ${fmtNum(posterior.sigma)} ${unit}`}>
+          <line x1="8" x2="292" y1="40" y2="40" stroke="var(--mh-sep)" strokeWidth="1" />
+          <rect x={x(prior.value - prior.sigma)} y="6" width={Math.max(2, x(prior.value + prior.sigma) - x(prior.value - prior.sigma))} height="10" rx="5" fill="#8E8E93" opacity="0.55" />
+          <line x1={x(prior.value)} x2={x(prior.value)} y1="3" y2="19" stroke="#8E8E93" strokeWidth="2" />
+          <rect x={x(posterior.value - posterior.sigma)} y="22" width={Math.max(3, x(posterior.value + posterior.sigma) - x(posterior.value - posterior.sigma))} height="10" rx="5" fill="#35B17A" />
+          <line x1={x(posterior.value)} x2={x(posterior.value)} y1="19" y2="35" stroke="#35B17A" strokeWidth="2" />
+          <text x="8" y="46" fontSize="8" fill="var(--mh-text2)">{fmtNum(lo, 1)}</text>
+          <text x="292" y="46" fontSize="8" fill="var(--mh-text2)" textAnchor="end">{fmtNum(hi, 1)} {unit}</text>
+        </svg>
+        <span className="flex flex-wrap items-center gap-2 text-base">
+          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: level.color }} aria-hidden="true" />
+          <span>
+            Residual: <strong>{residual >= 0 ? '+' : '−'}{fmtNum(Math.abs(residual), 1)} {unit}</strong> ({fmtNum(Math.abs(nSigma), 1)} σ) ·{' '}
+            {level.label}
+          </span>
+        </span>
+      </div>
+    );
+  }
+
+  const meta = MEASURE_KIND[kind] ?? MEASURE_KIND.prior;
+  const rel = value ? Math.abs((sigma / value) * 100) : null;
+  return (
+    <div className={`flex flex-col gap-1 min-w-0 ${compact ? 'p-3 rounded-mh-md bg-mh-fill' : ''}`}>
+      {label && (
+        <span className="font-mono text-[13px] uppercase tracking-[0.08em] text-mh-text2">{label}</span>
+      )}
+      <span className="flex flex-wrap items-center gap-1.5">
+        <span className={`mh-pill ${meta.cls} !text-[13px] !py-0.5`}>{meta.label}</span>
+        {simulated && <SimBadge />}
+      </span>
+      <span className="text-base">
+        <strong className="text-[18px]">{fmtNum(value, 1)}</strong> ± {fmtNum(sigma)} {unit}
+        {rel != null && <span className="text-mh-text2"> ({fmtNum(rel, 0)} %)</span>}
+      </span>
+      {source && <span className="font-mono text-[12px] text-mh-text2 break-words">{source}</span>}
+    </div>
+  );
+}
+
+// Elevation profile sparkline: >15° in red, not-evaluated in amber, POI markers
+function ElevationProfile({ metrics, stops, slopeLimit, onSegment }) {
+  const W = 320;
+  const H = 96;
+  const pad = { l: 34, r: 6, t: 8, b: 18 };
+  const s = metrics.samples;
+  const total = metrics.distanceKm || 1;
+  const elevs = s.map((p) => p.elev);
+  const lo = Math.floor(Math.min(...elevs) - 3);
+  const hi = Math.ceil(Math.max(...elevs) + 3);
+  const x = (d) => pad.l + (d / total) * (W - pad.l - pad.r);
+  const y = (e) => pad.t + (1 - (e - lo) / (hi - lo || 1)) * (H - pad.t - pad.b);
+  const line = s.map((p, i) => `${i ? 'L' : 'M'}${x(p.distKm).toFixed(1)},${y(p.elev).toFixed(1)}`).join(' ');
+  const bands = metrics.segments.filter((g) => g.steep || g.ne);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label={`Elevation profile from ${lo} to ${hi} m over ${total.toFixed(2)} km`}>
+      {bands.map((g, i) => (
+        <rect
+          key={i}
+          x={x(g.from)}
+          y={pad.t}
+          width={Math.max(1.5, x(g.to) - x(g.from))}
+          height={H - pad.t - pad.b}
+          fill={g.steep ? '#E5484D' : '#E5C04A'}
+          opacity={g.steep ? 0.35 : 0.3}
+          className={onSegment ? 'cursor-pointer' : ''}
+          onClick={onSegment ? () => onSegment(g) : undefined}
+        >
+          <title>{g.steep ? `Slope > ${slopeLimit}°` : 'Not evaluated'}</title>
+        </rect>
+      ))}
+      <path d={line} fill="none" stroke="var(--mh-text)" strokeWidth="1.8" />
+      {stops
+        .filter((st) => st.kind === 'poi')
+        .map((st) => (
+          <g key={`${st.poiId}-${st.distKm}`}>
+            <line x1={x(st.distKm)} x2={x(st.distKm)} y1={pad.t} y2={H - pad.b} stroke="#2D7FF9" strokeDasharray="2 2" />
+            <text x={x(st.distKm)} y={H - 6} fontSize="8" textAnchor="middle" fill="#2D7FF9">
+              {st.poiId}
+            </text>
+          </g>
+        ))}
+      <text x="2" y={pad.t + 6} fontSize="8" fill="var(--mh-text2)">{hi} m</text>
+      <text x="2" y={H - pad.b} fontSize="8" fill="var(--mh-text2)">{lo} m</text>
+      <text x={W - pad.r} y={H - 6} fontSize="8" fill="var(--mh-text2)" textAnchor="end">{total.toFixed(2)} km</text>
+    </svg>
+  );
+}
+
+function ConstraintTable({ evaluation }) {
+  return (
+    <div className="mh-table-wrap">
+      <table className="mh-table !text-[14px]">
+        <thead>
+          <tr>
+            <th scope="col">Constraint</th>
+            <th scope="col">Value</th>
+            <th scope="col">Limit</th>
+            <th scope="col">Margin</th>
+          </tr>
+        </thead>
+        <tbody>
+          {evaluation.rows.map((r) => {
+            const st = STATUS_META[r.status];
+            return (
+              <tr key={r.id} className={r.determinant ? 'bg-mh-fill-blue' : ''}>
+                <td className="!py-2">
+                  <span className="flex flex-col">
+                    <span className="font-semibold">{r.name}</span>
+                    {r.determinant && <span className="text-[12px] text-mh-link">Binding constraint</span>}
+                  </span>
+                </td>
+                <td className="!py-2 whitespace-nowrap">
+                  {r.fmt(r.value)} {r.unit !== 'LST' ? r.unit : ''}
+                </td>
+                <td className="!py-2 whitespace-nowrap text-mh-text2">
+                  {r.dir === 'max' ? '≤' : '≥'} {r.fmt(r.limit)} {r.unit !== 'LST' ? r.unit : ''}
+                </td>
+                <td className="!py-2 whitespace-nowrap">
+                  <span className={`mh-pill ${st.cls} !text-[13px]`}>
+                    {r.id === 'sep' ? st.label : `${r.margin >= 0 ? '+' : '−'}${r.id === 'slope' || r.id === 'notEvaluated' ? Math.abs(r.margin).toFixed(1) : r.id === 'dose' ? Math.abs(r.margin).toFixed(2) : Math.round(Math.abs(r.margin))}${r.unit === 'LST' ? ' min' : ` ${r.unit}`}`}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
