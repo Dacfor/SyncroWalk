@@ -47,6 +47,7 @@ import ControlPanel from './planner/ControlPanel.tsx';
 import AstronautPanel from './planner/AstronautPanel.tsx';
 import { DiscoveryDetail, DiscoveryList } from './planner/Discoveries.tsx';
 import UserMenu from './planner/UserMenu.tsx';
+import { COMPOSITION_LAYERS, CompositionMenu, compositionLayer } from './planner/LayerMenus.tsx';
 import { BASE, CREW_ROSTER, FIELD_EVENT_META, PRIORITY_META, TODAY_SOL, instrumentName, planFor } from './planner/model.ts';
 import {
   DEMO_ASSUMPTIONS,
@@ -326,7 +327,8 @@ const DEFAULT_FILTERS = {
   topographySlope: false, // MOLA+HRSC hillshade, >15° segments, not-evaluated zones
   atmosphereMeda: false, // TES dust index
   hazards: false, // operational field hazards (boulder, soft soil)
-  shelters: false // shelters + 40-min return ring
+  shelters: false, // shelters + 40-min return ring
+  composition: null // Scientist only: 'maf' | 'car' | 'phy' (CRISM 18 m/px) | 'tes' (regional)
 };
 
 // Layer toggles offered to each role in the map header: [filter key, label, hint]
@@ -800,6 +802,7 @@ export default function MissionPlanner() {
   const mapContainerRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const tileLayersRef = useRef({});
+  const crismOverlaysRef = useRef({}); // composition id -> L.imageOverlay[] (created on first use)
   const vectorGroupsRef = useRef({
     traverse: null,
     fusionPrior: null,
@@ -988,6 +991,12 @@ export default function MissionPlanner() {
       tileLayersRef.current.ctxJez.addTo(map);
       tileLayersRef.current.hiriseJez.addTo(map);
 
+      // CRISM image overlays sit above the base tiles and below every vector layer
+      map.createPane('crism');
+      map.getPane('crism').style.zIndex = 350;
+      map.getPane('crism').style.pointerEvents = 'none';
+      map.getPane('crism').style.mixBlendMode = 'screen'; // dark (no signal) pixels let the imagery through
+
       // 5. Initialize Vector Layer Groups
       vectorGroupsRef.current.fusionPrior = L.layerGroup().addTo(map);
       vectorGroupsRef.current.fusionPosterior = L.layerGroup().addTo(map);
@@ -1032,39 +1041,6 @@ export default function MissionPlanner() {
       setMapReady(true);
       appendStatus('Jezero L.CRS.EPSG4326 map ready. HiRISE 25 cm/px active at zoom 14–17.');
 
-      // 7. Fetch Live Perseverance Traverse & Waypoints from MMGIS (with fallback)
-      try {
-        const prefix = useFastApiProxy ? proxyBaseUrl : '';
-        const travUrl = prefix
-          ? prefix + encodeURIComponent(M20_MMGIS_BASE + 'M20_traverse.json')
-          : M20_MMGIS_BASE + 'M20_traverse.json';
-        const wpUrl = prefix
-          ? prefix + encodeURIComponent(M20_MMGIS_BASE + 'M20_waypoints.json')
-          : M20_MMGIS_BASE + 'M20_waypoints.json';
-
-        const [travRes, wpRes] = await Promise.all([fetch(travUrl), fetch(wpUrl)]);
-        if (travRes.ok && wpRes.ok) {
-          const [travJson, wpJson] = await Promise.all([travRes.json(), wpRes.json()]);
-          if (wpJson?.features?.length) {
-            waypointsRef.current = wpJson.features.map((f) => ({
-              sol: f.properties?.sol ?? 0,
-              name: f.properties?.name || `Sol ${f.properties?.sol ?? '?'}`,
-              lon: f.geometry.coordinates[0],
-              lat: f.geometry.coordinates[1],
-              elev: f.properties?.elev_geoid ?? -2550
-            }));
-          }
-          liveTraverseRef.current = travJson;
-          setTraverseVersion((v) => v + 1);
-          appendStatus(
-            `Live MMGIS Perseverance traverse loaded (${waypointsRef.current.length} waypoints).`
-          );
-        }
-      } catch (err) {
-        appendStatus(
-          'Using built-in PDS Perseverance traverse (Octavia E. Butler → Séítah → Wildcat Ridge).'
-        );
-      }
     };
 
     loadLeafletAndInit();
@@ -1073,6 +1049,42 @@ export default function MissionPlanner() {
       isMounted = false;
     };
   }, []);
+
+  // Live Perseverance traverse (MMGIS). mars.nasa.gov sends no CORS header, so the browser can
+  // only read it through the local FastAPI proxy: it is fetched once, when the proxy is on and the
+  // traverse layer is first switched on. Otherwise the built-in PDS waypoints are used.
+  const [dataLink, setDataLink] = useState({ mmgis: 'built-in' });
+  useEffect(() => {
+    if (!useFastApiProxy || !activeFilters.filter3_pdsTargetsTraverse || liveTraverseRef.current) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const url = (name) => proxyBaseUrl + encodeURIComponent(M20_MMGIS_BASE + name);
+        const [travRes, wpRes] = await Promise.all([fetch(url('M20_traverse.json')), fetch(url('M20_waypoints.json'))]);
+        if (!travRes.ok || !wpRes.ok) throw new Error('MMGIS not reachable');
+        const [travJson, wpJson] = await Promise.all([travRes.json(), wpRes.json()]);
+        if (cancelled) return;
+        if (wpJson?.features?.length) {
+          waypointsRef.current = wpJson.features.map((f) => ({
+            sol: f.properties?.sol ?? 0,
+            name: f.properties?.name || `Sol ${f.properties?.sol ?? '?'}`,
+            lon: f.geometry.coordinates[0],
+            lat: f.geometry.coordinates[1],
+            elev: f.properties?.elev_geoid ?? -2550
+          }));
+        }
+        liveTraverseRef.current = travJson;
+        setTraverseVersion((v) => v + 1);
+        setDataLink((d) => ({ ...d, mmgis: 'live' }));
+        appendStatus(`Live MMGIS Perseverance traverse loaded (${waypointsRef.current.length} waypoints).`);
+      } catch {
+        if (!cancelled) setDataLink((d) => ({ ...d, mmgis: 'degraded' }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [useFastApiProxy, activeFilters.filter3_pdsTargetsTraverse]);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // SYNCHRONIZE RASTER LAYERS & VECTOR OVERLAYS WHEN FILTERS OR STATE CHANGE
@@ -1102,11 +1114,30 @@ export default function MissionPlanner() {
     syncTile('ctxJez', true, rasterOpacities.ctxJez);
 
     // Role Filter 1 (Scientist): Spectral Prior & CRISM/PDS Fusion
+    const composition = currentRole === 'scientist' ? activeFilters.composition : null;
     syncTile(
       'tesClay',
-      activeFilters.filter1_spectralFusion && currentRole !== 'astronaut',
+      (activeFilters.filter1_spectralFusion && currentRole !== 'astronaut') || composition === 'tes',
       rasterOpacities.tesClay
     );
+
+    // Soil composition (Scientist only): CRISM MTRDR browse products as image overlays,
+    // bounds from the PDS label. One composition layer at a time.
+    COMPOSITION_LAYERS.forEach((lyr) => {
+      if (!lyr.scenes.length) return;
+      const show = composition === lyr.id;
+      let overlays = crismOverlaysRef.current[lyr.id];
+      if (show && !overlays) {
+        overlays = lyr.scenes.map((sc) =>
+          L.imageOverlay(sc.file, sc.bounds, { pane: 'crism', opacity: 0.9, className: 'mh-crism', interactive: false })
+        );
+        crismOverlaysRef.current[lyr.id] = overlays;
+      }
+      (overlays ?? []).forEach((ov) => {
+        if (show && !map.hasLayer(ov)) ov.addTo(map);
+        if (!show && map.hasLayer(ov)) map.removeLayer(ov);
+      });
+    });
 
     // Role Filter 2 (Scientist): Thermal Inertia (THEMIS Night IR)
     syncTile(
@@ -1873,6 +1904,12 @@ export default function MissionPlanner() {
           {/* Map header: one compact row of layer toggles → more room for the map */}
           <div className="px-5 py-3 flex flex-wrap items-center gap-2 border-b border-mh-sep shrink-0">
             <span className="mh-eyebrow mr-1">Layers</span>
+            {currentRole === 'scientist' && (
+              <CompositionMenu
+                value={activeFilters.composition}
+                onChange={(v) => setActiveFilters((prev) => ({ ...prev, composition: v }))}
+              />
+            )}
             {LAYER_TOGGLES[currentRole].map(([key, label, hint]) => (
               <FilterToggle key={key} on={activeFilters[key]} onClick={() => handleToggleRoleFilter(key)} hint={hint}>
                 {label}
@@ -2420,6 +2457,20 @@ export default function MissionPlanner() {
                 </div>
               ))}
 
+              <span className="mh-eyebrow mt-3">Composition (CRISM MTRDR browse products)</span>
+              {COMPOSITION_LAYERS.filter((l) => l.scenes.length).map((lyr) => (
+                <div key={lyr.id} className="p-4 rounded-mh-md bg-mh-card shadow-mh flex flex-col gap-1">
+                  <strong className="text-base">{lyr.label}</strong>
+                  <span className="text-base text-mh-text2">
+                    {lyr.source} · {lyr.resolution} · {lyr.rgb}
+                  </span>
+                  <span className="font-mono text-[12px] text-mh-text2 break-words">
+                    {lyr.scenes.map((sc) => `${sc.productId} (${sc.acquired})`).join(' · ')}
+                  </span>
+                  <span className="text-base text-mh-text2">PDS Geosciences Node, public domain. Scientist view only.</span>
+                </div>
+              ))}
+
               <span className="mh-eyebrow mt-3">Not-evaluated zones</span>
               {JEZERO_NOT_EVALUATED_ZONES.map((z) => (
                 <div key={z.id} className="p-4 rounded-mh-md bg-mh-card shadow-mh flex flex-col gap-2">
@@ -2574,6 +2625,7 @@ function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe
   const showHazards = activeFilters.topographySlope && notHud;
   const showShelters = isSci ? activeFilters.reachable : activeFilters.shelters;
   const showTraverse = activeFilters.filter3_pdsTargetsTraverse && notHud;
+  const composition = isSci ? compositionLayer(activeFilters.composition) : null;
 
   return (
     <div className="absolute top-3 left-3 z-20 w-[270px] max-w-[calc(100%-5rem)] max-h-[calc(100%-1.5rem)] flex flex-col bg-mh-card text-mh-text rounded-mh-md shadow-mh overflow-hidden">
@@ -2628,6 +2680,30 @@ function MapLegend({ currentRole, activeFilters, routeVisible, showDraft, showFe
                 In-situ measurement (PDS posterior)
               </LegendRow>
               <LegendRow swatch={<LineSwatch color="#38bdf8" width={7} />}>Hydrated vein corridor</LegendRow>
+            </LegendSection>
+          )}
+
+          {composition && (
+            <LegendSection title={`Composition · ${composition.short}`}>
+              {composition.colors.map(([c, text]) => (
+                <LegendRow key={text} swatch={<span className="w-4 h-4 rounded-[2px] border border-white/40" style={{ background: c }} aria-hidden="true" />}>
+                  {text}
+                </LegendRow>
+              ))}
+              <li className="text-mh-text2">
+                {composition.source} · <strong>{composition.resolution}</strong>
+                {composition.rgb ? ` · ${composition.rgb}` : ''}
+              </li>
+              {composition.scenes.length > 0 && (
+                <li className="text-mh-text2 font-mono text-[12px] break-words">
+                  {composition.scenes.map((sc) => `${sc.productId} (${sc.acquired})`).join(' · ')}
+                </li>
+              )}
+              <li className="text-mh-text2">
+                {composition.scenes.length > 0
+                  ? 'Real PDS data, orbital prior: colours show spectral band strength, not abundance. Dark = no signal. Stripes are detector noise.'
+                  : composition.note}
+              </li>
             </LegendSection>
           )}
 

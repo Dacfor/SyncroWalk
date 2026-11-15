@@ -109,6 +109,39 @@ body,
   filter: url(#mh-thermal-rdbu);
 }
 
+/* CRISM browse products: display-only stretch (the PDS browse PNGs are very dark) */
+.mh-crism {
+  filter: brightness(2.4) contrast(1.15) saturate(1.5);
+  image-rendering: auto;
+}
+
+/* Map-header layer menu (Composition) */
+.mh-layer-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--mh-touch);
+  padding: 0 6px 0 16px;
+  border-radius: var(--mh-radius-pill);
+  background: var(--mh-fill);
+  color: var(--mh-text2);
+  font: 600 15px/1.2 var(--mh-font);
+}
+.mh-layer-select.is-on {
+  background: var(--mh-primary-soft);
+  color: var(--mh-link);
+}
+.mh-layer-select select {
+  min-height: 32px;
+  max-width: 250px;
+  border: 0;
+  border-radius: var(--mh-radius-pill);
+  background: var(--mh-card);
+  color: var(--mh-text);
+  font: 500 14px var(--mh-font);
+  padding: 0 8px;
+}
+
 /* POI flags: colour = priority, number = visit order */
 .mh-poi-flag {
   width: 30px;
