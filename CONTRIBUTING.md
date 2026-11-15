@@ -2,7 +2,7 @@
 
 First off, thank you for considering contributing to **SyncroWalk**! Open-source collaboration is at the heart of space exploration and scientific discovery.
 
-This project was built for the **NASA Space Apps Challenge** (*Interplanetary Survival Guide: Martian Map*), addressing rapid multi-role EVA mission planning and Bayesian decision support on Mars.
+This project was built for the **NASA Space Apps Challenge** (*Interplanetary Survival Guide: Martian Map*), addressing multi-role EVA mission planning and decision support for human crews on Mars.
 
 ---
 
@@ -29,7 +29,7 @@ We are committed to providing a welcoming, inclusive, and harassment-free enviro
 ## 🛠️ How Can I Contribute?
 
 - **Report Bugs:** Open an issue describing the bug, reproduction steps, expected behavior, and browser/OS details.
-- **Suggest Features:** Have ideas for Martian GIS layers, astronaut HUD ergonomics, or Bayesian fusion models? Open a feature request issue!
+- **Suggest Features:** Have ideas for Martian GIS layers, astronaut view ergonomics, or EVA safety models? Open a feature request issue!
 - **Submit Pull Requests:** Bug fixes, documentation improvements, new NASA PDS data parsers, and UI enhancements are all welcome.
 
 ---
@@ -58,39 +58,21 @@ We are committed to providing a welcoming, inclusive, and harassment-free enviro
 
 ### 2. Environment Setup
 
-* **Frontend:** Node.js ($\ge 18$) and npm.
-  ```bash
-  npm install
-  ```
+Requirements: **Node.js 20.19+** (or 22.12+) and npm. No backend is needed.
 
-* **Backend Proxy (Optional):** Python ($\ge 3.10$).
-  * **Windows:**
-    ```powershell
-    python -m venv .venv
-    .\.venv\Scripts\Activate.ps1
-    # Note: If PowerShell scripts are restricted, run:
-    # Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-    pip install -r requirements.txt
-    ```
-  * **macOS / Linux:**
-    ```bash
-    chmod +x setup_env.sh
-    ./setup_env.sh
-    ```
+```bash
+npm install
+```
 
 ### 3. Running Locally
 
-* **Frontend:**
-  ```bash
-  npm run dev
-  ```
-  App starts at `http://localhost:5173`.
+```bash
+npm run dev
+```
 
-* **Proxy (Optional):**
-  ```bash
-  uvicorn proxy:app --host 127.0.0.1 --port 8000 --reload
-  # Or directly: .\.venv\Scripts\python -m uvicorn proxy:app --port 8000 --reload
-  ```
+The app starts at `http://localhost:5173`.
+
+> THEMIS temperature files and Perseverance waypoints are loaded through the Vite proxy defined in `vite.config.ts`. Always test with `npm run dev` or `npm run preview`, not by opening the built files directly.
 
 ---
 
@@ -109,9 +91,11 @@ Before committing, verify your changes pass all linters and compilation checks:
    Ensure the TypeScript compiler passes with **0 errors**.
 
 ### Design Principles:
-- **Astronaut HUD:** Touch targets must remain glove-friendly ($\ge 64\text{ px}$) and readable in $<3\text{ seconds}$.
-- **GIS Canvas:** The Leaflet map instance must remain persistent across role switches (`Scientist` $\leftrightarrow$ `Mission Control` $\leftrightarrow$ `Astronaut HUD`).
-- **Telemetry & Badges:** Every planetary layer must clearly state its **Mission + Instrument + Spatial Resolution**.
+- **One persistent map:** the Leaflet map instance must survive role switches (`Scientist` ↔ `Mission Control` ↔ `Astronaut`).
+- **Safety first:** terrain that has not been evaluated is shown in amber, never as safe, and a NO-GO plan must never reach the crew.
+- **Provenance:** every map layer states its instrument and spatial resolution.
+- **Honest data:** real NASA data and illustrative demo values must always be distinguishable.
+- **Astronaut view:** keep it essential and readable at a glance, with no spectral or planning clutter.
 
 ---
 
@@ -120,7 +104,7 @@ Before committing, verify your changes pass all linters and compilation checks:
 We follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:
 
 - `feat:` A new feature (e.g., `feat: add THEMIS thermal inertia overlay`)
-- `fix:` A bug fix (e.g., `fix: correct byte-range header forwarding in proxy`)
+- `fix:` A bug fix (e.g., `fix: correct THEMIS row range over Jezero`)
 - `docs:` Documentation changes (e.g., `docs: update setup guide in README`)
 - `style:` Formatting changes that do not affect code logic
 - `refactor:` Code restructuring without adding features or fixing bugs
@@ -131,7 +115,7 @@ We follow the [Conventional Commits](https://www.conventionalcommits.org/) speci
 
 ## 🚀 Submitting a Pull Request
 
-1. Ensure all tests and builds pass (`npm run build`).
+1. Ensure the build and the linter pass (`npm run build` and `npm run lint`).
 2. Push your branch to your GitHub fork:
    ```bash
    git push origin <your-branch-name>
